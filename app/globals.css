@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-raleway: 'Raleway', sans-serif;
+  }
+
+  html,
+  body {
+    font-family: var(--font-raleway), sans-serif;
+    height: 100%;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  /* Thin, unobtrusive scrollbars */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(100, 100, 100, 0.2);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(100, 100, 100, 0.35);
+  }
+}
+
+@layer utilities {
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}
+
+/* Blinking cursor for typewriter effect */
+@keyframes blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+.animate-\[blink_0\.8s_step-end_infinite\] {
+  animation: blink 0.8s step-end infinite;
+}
