@@ -208,7 +208,7 @@ export default function ChatArea() {
                   >
                     <div className={`p-2 rounded-xl transition-colors
                       ${isDark
-                        ? 'bg-white text-white/12 group-hover:bg-white group-hover:text-white'
+                        ? 'bg-white text-white/12 '
                         : 'bg-charcoal/6 text-charcoal/55 group-hover:bg-charcoal/10 group-hover:text-charcoal/80'
                       }`}
                     >
