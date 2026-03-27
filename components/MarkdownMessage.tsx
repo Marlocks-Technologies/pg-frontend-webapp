@@ -181,7 +181,7 @@ export default function MarkdownMessage({ content, isDark, className = '' }: Pro
                     <span className={`mt-[7px] w-1.5 h-1.5 rounded-full shrink-0
                       ${isDark ? 'bg-amber-400/50' : 'bg-charcoal/30'}`}
                     />
-                    <span className="leading-relaxed">{renderInline(item, isDark)}</span>
+                    <span className={`leading-relaxed ${isDark ? 'text-white' : 'text-charcoal'}`}>{renderInline(item, isDark)}</span>
                   </li>
                 ))}
               </ul>

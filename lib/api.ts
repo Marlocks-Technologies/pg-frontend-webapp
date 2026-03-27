@@ -2,6 +2,8 @@ const BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
   'https://yvf4p3dpp7.execute-api.eu-west-1.amazonaws.com/dev';
 
+const DOCUMENT_URL = process.env.NEXT_PUBLIC_DOCUMENT_BASE_URL || 'https://lh8dbbvwbb.execute-api.eu-west-1.amazonaws.com/dev';
+
 // ── The fix: async function that AWAITS fetch before passing to handler ────────
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -119,4 +121,81 @@ export async function getChatHistory(
 ): Promise<HistoryResponse> {
   const res = await fetch(`${BASE_URL}/chat/history/${sessionId}`);
   return handleResponse<HistoryResponse>(res);
+}
+
+// ─── 4. Upload Document  POST /documents ─────────────────────────────────────
+
+export interface UploadDocumentRequest {
+  filename: string;
+  content: string;
+  metadata?: Record<string, string>;
+}
+
+export interface UploadDocumentResponse {
+  documentId: string;
+  uploadUrl?: string;  // S3 presigned URL if returned
+  status: string;
+}
+
+export async function uploadDocument(
+  payload: UploadDocumentRequest
+): Promise<UploadDocumentResponse> {
+  const res = await fetch(`${DOCUMENT_URL}/documents`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<UploadDocumentResponse>(res);
+}
+
+// ─── 5. List Documents  GET /documents ───────────────────────────────────────
+
+export interface DocumentSummary {
+  documentId: string;
+  filename: string;
+  category?: string;
+  uploadTime: string;
+  size?: number;
+  status?: string;
+}
+
+export interface ListDocumentsResponse {
+  documents: DocumentSummary[];
+  total?: number;
+}
+
+export async function listDocuments(): Promise<ListDocumentsResponse> {
+  const res = await fetch(`${DOCUMENT_URL}/documents`);
+  return handleResponse<ListDocumentsResponse>(res);
+}
+
+// ─── 6. Get Document Details  GET /documents/:documentId ─────────────────────
+
+export interface DocumentDetail extends DocumentSummary {
+  chunkCount?: number;
+  storageLocation?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export async function getDocumentDetails(
+  documentId: string
+): Promise<DocumentDetail> {
+  const res = await fetch(`${DOCUMENT_URL}/documents/${documentId}`);
+  return handleResponse<DocumentDetail>(res);
+}
+
+// ─── 7. Delete Document  DELETE /documents/:documentId ───────────────────────
+
+export interface DeleteDocumentResponse {
+  success: boolean;
+  documentId: string;
+}
+
+export async function deleteDocument(
+  documentId: string
+): Promise<DeleteDocumentResponse> {
+  const res = await fetch(`${DOCUMENT_URL}/documents/${documentId}`, {
+    method: 'DELETE',
+  });
+  return handleResponse<DeleteDocumentResponse>(res);
 }
