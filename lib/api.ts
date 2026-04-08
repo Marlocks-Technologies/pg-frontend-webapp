@@ -1,6 +1,6 @@
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
-  'https://yvf4p3dpp7.execute-api.eu-west-1.amazonaws.com/dev';
+  'https://lh8dbbvwbb.execute-api.eu-west-1.amazonaws.com/dev';
 
 const DOCUMENT_URL = process.env.NEXT_PUBLIC_DOCUMENT_BASE_URL || 'https://lh8dbbvwbb.execute-api.eu-west-1.amazonaws.com/dev';
 
