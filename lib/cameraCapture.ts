@@ -31,6 +31,58 @@ function waitForMediaEvent(
   });
 }
 
+function cameraUnavailableMessage(): string {
+  if (typeof window !== 'undefined' && window.isSecureContext === false) {
+    return [
+      'Camera capture requires HTTPS or localhost.',
+      'Open this page from a secure origin and try again.',
+    ].join(' ');
+  }
+  return 'Camera capture is not supported in this browser.';
+}
+
+function getCameraMedia(constraints: MediaStreamConstraints): Promise<MediaStream> {
+  if (navigator.mediaDevices?.getUserMedia) {
+    return navigator.mediaDevices.getUserMedia(constraints);
+  }
+
+  const legacyNavigator = navigator as Navigator & {
+    getUserMedia?: (
+      constraints: MediaStreamConstraints,
+      successCallback: (stream: MediaStream) => void,
+      errorCallback: (error: DOMException) => void
+    ) => void;
+    webkitGetUserMedia?: (
+      constraints: MediaStreamConstraints,
+      successCallback: (stream: MediaStream) => void,
+      errorCallback: (error: DOMException) => void
+    ) => void;
+    mozGetUserMedia?: (
+      constraints: MediaStreamConstraints,
+      successCallback: (stream: MediaStream) => void,
+      errorCallback: (error: DOMException) => void
+    ) => void;
+    msGetUserMedia?: (
+      constraints: MediaStreamConstraints,
+      successCallback: (stream: MediaStream) => void,
+      errorCallback: (error: DOMException) => void
+    ) => void;
+  };
+  const legacyGetUserMedia =
+    legacyNavigator.getUserMedia ||
+    legacyNavigator.webkitGetUserMedia ||
+    legacyNavigator.mozGetUserMedia ||
+    legacyNavigator.msGetUserMedia;
+
+  if (!legacyGetUserMedia) {
+    throw new Error(cameraUnavailableMessage());
+  }
+
+  return new Promise((resolve, reject) => {
+    legacyGetUserMedia.call(navigator, constraints, resolve, reject);
+  });
+}
+
 export function captureFrameBytes(frame: CaptureFrame): number {
   const encoded = frame.content.includes(',')
     ? frame.content.split(',', 2)[1]
@@ -82,11 +134,11 @@ export function captureVideoFrame(
 export async function startDocumentCamera(
   video: HTMLVideoElement
 ): Promise<MediaStream> {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error('Camera capture is not supported in this browser.');
+  if (typeof navigator === 'undefined') {
+    throw new Error('Camera capture is only available in a browser.');
   }
 
-  const stream = await navigator.mediaDevices.getUserMedia({
+  const stream = await getCameraMedia({
     audio: false,
     video: {
       facingMode: { ideal: 'environment' },

@@ -884,7 +884,9 @@ import {
   deleteDocument,
   DocumentSummary,
   DocumentDetail,
+  CaptureDocumentResponse,
 } from '@/lib/api';
+import CaptureModal from './CaptureModal';
 
 // ─── Supported file types ─────────────────────────────────────────────────────
 
@@ -989,6 +991,7 @@ function StatusBadge({ status, isDark }: { status?: string; isDark: boolean }) {
   const s = (status ?? 'unknown').toLowerCase();
   const colours: Record<string, string> = {
     processed:  isDark ? 'bg-emerald-400/12 text-emerald-400' : 'bg-emerald-50 text-emerald-600',
+    completed:  isDark ? 'bg-emerald-400/12 text-emerald-400' : 'bg-emerald-50 text-emerald-600',
     processing: isDark ? 'bg-amber-400/12 text-amber-400'    : 'bg-amber-50 text-amber-600',
     failed:     isDark ? 'bg-red-400/12 text-red-400'        : 'bg-red-50 text-red-500',
     unknown:    isDark ? 'bg-white/6 text-white/35'           : 'bg-charcoal/5 text-charcoal/45',
@@ -1066,6 +1069,7 @@ function UploadModal({
       await uploadDocument({
         filename: filename.trim(),
         content: content.trim(),
+        contentType: pickedFile?.type || 'text/plain',
         metadata: Object.keys(metadata).length ? metadata : undefined,
       });
       onSuccess();
@@ -1421,6 +1425,8 @@ export default function DocumentsPanel({ isDark }: { isDark: boolean }) {
   const [loading, setLoading]         = useState(true);
   const [error, setError]             = useState('');
   const [showUpload, setShowUpload]   = useState(false);
+  const [showCapture, setShowCapture] = useState(false);
+  const [queuedCapture, setQueuedCapture] = useState<CaptureDocumentResponse | null>(null);
   const [detailId, setDetailId]       = useState<string | null>(null);
   const [deletingId, setDeletingId]   = useState<string | null>(null);
   const [search, setSearch]           = useState('');
@@ -1451,6 +1457,19 @@ export default function DocumentsPanel({ isDark }: { isDark: boolean }) {
     } finally {
       setDeletingId(null);
     }
+  };
+
+  const handleCaptureQueued = (result: CaptureDocumentResponse) => {
+    setQueuedCapture(result);
+    setDocs(current => [
+      {
+        documentId: result.documentId,
+        filename: result.filename,
+        status: result.status,
+        uploadTime: new Date().toISOString(),
+      },
+      ...current.filter(document => document.documentId !== result.documentId),
+    ]);
   };
 
   const filtered = search.trim()
@@ -1497,6 +1516,22 @@ export default function DocumentsPanel({ isDark }: { isDark: boolean }) {
           </button>
 
           {/* Upload */}
+          <button
+            onClick={() => setShowCapture(true)}
+            className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-[12.5px] font-semibold transition-colors
+              focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2
+              ${isDark
+                ? 'border-white/[0.1] text-white/75 hover:bg-white/[0.06] hover:text-white'
+                : 'border-charcoal/[0.12] text-charcoal/70 hover:bg-charcoal/[0.05] hover:text-charcoal'
+              }`}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <path d="M14.5 4 16 7h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h3l1.5-3h5Z"/>
+              <circle cx="12" cy="13" r="4"/>
+            </svg>
+            Capture
+          </button>
+
           <button
             onClick={() => setShowUpload(true)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[12.5px] font-semibold transition-all active:scale-95
@@ -1545,6 +1580,39 @@ export default function DocumentsPanel({ isDark }: { isDark: boolean }) {
           )}
         </div>
       </div>
+
+      {queuedCapture && (
+        <div className={`shrink-0 flex items-start gap-3 border-b px-5 py-3
+          ${isDark
+            ? 'border-white/[0.07] bg-amber-400/[0.06]'
+            : 'border-charcoal/[0.07] bg-amber-50'
+          }`}
+          role="status"
+        >
+          <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full
+            ${isDark ? 'bg-amber-300' : 'bg-amber-600'}`}
+          />
+          <div className="min-w-0 flex-1">
+            <p className={`text-[11px] font-semibold ${isDark ? 'text-white/85' : 'text-charcoal/85'}`}>
+              {queuedCapture.filename} is being extracted
+            </p>
+            <p className={`mt-0.5 text-[10px] leading-relaxed ${isDark ? 'text-white/60' : 'text-charcoal/60'}`}>
+              The document will appear with its category after OCR and indexing finish.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setQueuedCapture(null)}
+            className={`rounded-md p-1 transition-colors
+              ${isDark ? 'text-white/55 hover:bg-white/[0.07] hover:text-white' : 'text-charcoal/50 hover:bg-charcoal/[0.05] hover:text-charcoal'}`}
+            aria-label="Dismiss processing notice"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="m6 6 12 12M18 6 6 18"/>
+            </svg>
+          </button>
+        </div>
+      )}
 
       {/* ── Document list ─────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto px-5 py-4">
@@ -1632,7 +1700,7 @@ export default function DocumentsPanel({ isDark }: { isDark: boolean }) {
                 </div>
 
                 {/* Actions */}
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                <div className="flex items-center gap-1 opacity-100 transition-opacity duration-150 sm:opacity-0 sm:group-hover:opacity-100">
                   {/* Details */}
                   <button
                     onClick={() => setDetailId(doc.documentId)}
@@ -1682,6 +1750,13 @@ export default function DocumentsPanel({ isDark }: { isDark: boolean }) {
           isDark={isDark}
           onClose={() => setShowUpload(false)}
           onSuccess={fetchDocs}
+        />
+      )}
+      {showCapture && (
+        <CaptureModal
+          isDark={isDark}
+          onClose={() => setShowCapture(false)}
+          onQueued={handleCaptureQueued}
         />
       )}
       {detailId && (
