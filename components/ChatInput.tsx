@@ -6,6 +6,7 @@ import {
   useCallback,
   KeyboardEvent,
   ChangeEvent,
+  CSSProperties,
 } from 'react';
 import { useChatStore } from '@/lib/chatStore';
 import { documentSearch, SearchResult } from '@/lib/api';
@@ -36,10 +37,10 @@ function SearchPanel({
 
   return (
     <div
-      className={`mb-3 rounded-2xl border overflow-hidden
+      className={`pg-panel-in mb-3 rounded-2xl border overflow-hidden
         ${isDark
           ? 'bg-[#1c1c1e] border-white/10'
-          : 'bg-white border-charcoal/10 shadow-sm'
+          : 'bg-white border-charcoal/10'
         }`}
     >
       {/* Panel header */}
@@ -54,7 +55,7 @@ function SearchPanel({
         <button
           onClick={onClose}
           className={`p-1 rounded-md transition-colors
-            ${isDark ? 'text-white hover:text-white/60 hover:bg-white/6' : 'text-charcoal/30 hover:text-charcoal/60 hover:bg-charcoal/6'}`}
+            ${isDark ? 'text-white/40 hover:text-white/75 hover:bg-white/6' : 'text-charcoal/30 hover:text-charcoal/60 hover:bg-charcoal/6'}`}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
             <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
@@ -68,15 +69,15 @@ function SearchPanel({
           <div className="flex items-center justify-center py-8 gap-2">
             {[0, 1, 2].map(i => (
               <span key={i}
-                className={`w-1.5 h-1.5 rounded-full animate-bounce
-                  ${isDark ? 'bg-white/30' : 'bg-charcoal/30'}`}
+                className={`pg-dot w-1.5 h-1.5 rounded-full
+                  ${isDark ? 'bg-white/60' : 'bg-charcoal/50'}`}
                 style={{ animationDelay: `${i * 0.15}s` }}
               />
             ))}
           </div>
         ) : results && results.length === 0 ? (
           <p className={`text-[13px] text-center py-8
-            ${isDark ? 'text-white' : 'text-charcoal/35'}`}
+            ${isDark ? 'text-white/40' : 'text-charcoal/35'}`}
           >
             No matching documents found
           </p>
@@ -92,14 +93,14 @@ function SearchPanel({
             >
               {r.source && (
                 <p className={`text-[10px] font-semibold tracking-wide uppercase mb-1
-                  ${isDark ? 'text-white' : 'text-charcoal/40'}`}
+                  ${isDark ? 'text-white/45' : 'text-charcoal/40'}`}
                 >
                   {r.source}
                 </p>
               )}
               <p className="line-clamp-2">{r.content}</p>
               <p className={`text-[10px] mt-1.5 font-medium
-                ${isDark ? 'text-white' : 'text-charcoal/30'}`}
+                ${isDark ? 'text-white/30' : 'text-charcoal/30'}`}
               >
                 Relevance: {Math.round(r.score * 100)}%
               </p>
@@ -191,10 +192,12 @@ export default function ChatInput() {
                 setValue(s);
                 textareaRef.current?.focus();
               }}
-              className={`text-[11px] px-3 py-1.5 rounded-full border transition-all duration-150
+              style={{ animationDelay: `${i * 50}ms` }}
+              className={`pg-rise text-[11px] px-3 py-1.5 rounded-full border transition-all duration-150
+                active:scale-[0.97]
                 ${isDark
-                  ? 'border-white text-white hover:text-white/65 hover:border-white/20 hover:bg-white/4'
-                  : 'border-charcoal/12 text-charcoal hover:text-charcoal/70 hover:border-charcoal/22 hover:bg-charcoal/4'
+                  ? 'border-white/12 text-white/55 hover:text-white/85 hover:border-white/25 hover:bg-white/5'
+                  : 'border-charcoal/12 text-charcoal/55 hover:text-charcoal/85 hover:border-charcoal/25 hover:bg-charcoal/4'
                 }`}
             >
               {s.length > 38 ? s.slice(0, 38) + '…' : s}
@@ -203,17 +206,23 @@ export default function ChatInput() {
         </div>
       )}
 
-      {/* Input row */}
+      {/* Input row — the hairline carries a travelling sheen while focused/thinking */}
       <div
+        data-thinking={(isQuerying && !isSearchMode) || isSearching ? 'true' : undefined}
         className={`
-          flex items-end gap-2 px-3 py-2.5 rounded-2xl border
-          transition-all duration-200
+          pg-input-frame relative flex items-end gap-2 px-3 py-2.5 rounded-2xl border
+          transition-colors duration-200
           ${isDark
-            ? 'bg-[#1c1c1e] border-white/10 focus-within:border-white/22 focus-within:shadow-[0_0_0_3px_rgba(255,255,255,0.03)]'
-            : 'bg-white border-charcoal/12 focus-within:border-charcoal/25 focus-within:shadow-[0_0_0_3px_rgba(44,44,46,0.04)] shadow-sm'
+            ? 'bg-[#1c1c1e] border-white/10 focus-within:border-white/22'
+            : 'bg-white border-charcoal/12 focus-within:border-charcoal/25'
           }
         `}
+        style={{
+          '--pg-sheen-color': isDark ? 'rgba(255,255,255,0.55)' : 'rgba(44,44,46,0.45)',
+          '--pg-sheen-color-faint': isDark ? 'rgba(255,255,255,0.18)' : 'rgba(44,44,46,0.15)',
+        } as CSSProperties}
       >
+        <span aria-hidden className="pg-sheen" />
         {/* Search toggle */}
         <button
           onClick={() => {
@@ -221,13 +230,13 @@ export default function ChatInput() {
             setSearchResults(null);
           }}
           title={isSearchMode ? 'Switch to chat' : 'Search documents'}
-          className={`shrink-0 mb-0.5 p-2 rounded-xl transition-all duration-150
+          className={`shrink-0 mb-0.5 p-2 rounded-xl transition-all duration-150 active:scale-90
             ${isSearchMode
               ? isDark
-                ? 'bg-amber-400/15 text-amber-400'
+                ? 'bg-white/12 text-white/85'
                 : 'bg-charcoal/10 text-charcoal'
               : isDark
-                ? 'text-white hover:text-white/55 hover:bg-white/6'
+                ? 'text-white/35 hover:text-white/70 hover:bg-white/6'
                 : 'text-charcoal/28 hover:text-charcoal/60 hover:bg-charcoal/5'
             }`}
         >
@@ -247,7 +256,7 @@ export default function ChatInput() {
           rows={1}
           className={`
             flex-1 resize-none bg-transparent text-[13.5px] leading-[1.6] outline-none
-            ${isDark ? 'text-white placeholder-white' : 'text-charcoal/85 placeholder-charcoal/30'}
+            ${isDark ? 'text-white/88 placeholder-white/30' : 'text-charcoal/85 placeholder-charcoal/30'}
             disabled:opacity-50
           `}
           style={{ maxHeight: '160px', minHeight: '22px' }}
@@ -255,8 +264,8 @@ export default function ChatInput() {
 
         {/* Mode label */}
         {isSearchMode && (
-          <span className={`shrink-0 mb-1 text-[10px] font-bold tracking-widest uppercase
-            ${isDark ? 'text-amber-400/50' : 'text-charcoal/40'}`}
+          <span className={`pg-pop shrink-0 mb-1 text-[10px] font-bold tracking-widest uppercase
+            ${isDark ? 'text-white/45' : 'text-charcoal/40'}`}
           >
             SEARCH
           </span>
@@ -267,15 +276,15 @@ export default function ChatInput() {
           onClick={handleSend}
           disabled={!canSend}
           className={`
-            shrink-0 mb-0.5 w-8 h-8 rounded-xl flex items-center justify-center
-            transition-all duration-200 active:scale-95
+            group shrink-0 mb-0.5 w-8 h-8 rounded-xl flex items-center justify-center
+            transition-all duration-200 active:scale-90
             ${canSend
               ? isDark
-                ? 'bg-white text-[#1c1c1e] hover:bg-white/90 shadow-sm'
-                : 'bg-[#2C2C2E] text-white hover:bg-[#3a3a3c] shadow-sm'
+                ? 'bg-white text-[#1c1c1e] hover:bg-white/90 scale-100'
+                : 'bg-[#2C2C2E] text-white hover:bg-[#3a3a3c] scale-100'
               : isDark
-                ? 'bg-white text-white/18 cursor-not-allowed'
-                : 'bg-charcoal/5 text-charcoal/22 cursor-not-allowed'
+                ? 'bg-white/8 text-white/25 cursor-not-allowed scale-95'
+                : 'bg-charcoal/5 text-charcoal/22 cursor-not-allowed scale-95'
             }
           `}
         >
@@ -284,7 +293,11 @@ export default function ChatInput() {
               <path d="M21 12a9 9 0 1 1-6.219-8.56" strokeLinecap="round"/>
             </svg>
           ) : (
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="13" height="13" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+              className="transition-transform duration-200 group-hover:translate-x-[1.5px] group-hover:-translate-y-[1.5px]"
+            >
               <line x1="22" y1="2" x2="11" y2="13"/>
               <polygon points="22,2 15,22 11,13 2,9"/>
             </svg>
@@ -293,7 +306,7 @@ export default function ChatInput() {
       </div>
 
       <p className={`text-center text-[10px] mt-2.5
-        ${isDark ? 'text-white' : 'text-charcoal'}`}
+        ${isDark ? 'text-white/30' : 'text-charcoal/30'}`}
       >
         P&G Legal AI · For research purposes only — not legal advice
       </p>
