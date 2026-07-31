@@ -9,7 +9,13 @@ import {
   useEffect,
   ReactNode,
 } from 'react';
-import { chatQuery, getChatHistory, Citation } from './api';
+import {
+  chatQuery,
+  getChatHistory,
+  Citation,
+  GeneratedArtifact,
+  GenerateDocumentOptions,
+} from './api';
 
 // ─── Domain Types ─────────────────────────────────────────────────────────────
 
@@ -19,6 +25,7 @@ export interface Message {
   content: string;
   timestamp: Date;
   citations?: Citation[];
+  artifact?: GeneratedArtifact;
   isStreaming?: boolean;
   isError?: boolean;
   chunksRetrieved?: number;
@@ -241,7 +248,10 @@ function titleFromQuestion(q: string, max = 44) {
 interface ChatContextValue {
   state: ChatState;
   activeSession: Session | null;
-  sendMessage: (question: string) => Promise<void>;
+  sendMessage: (
+    question: string,
+    options?: { generateDocument?: GenerateDocumentOptions }
+  ) => Promise<void>;
   createSession: () => void;
   switchSession: (id: string) => void;
   deleteSession: (id: string) => void;
@@ -369,7 +379,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   // ── Send message ───────────────────────────────────────────────────────────
   const sendMessage = useCallback(
-    async (question: string) => {
+    async (question: string, options?: { generateDocument?: GenerateDocumentOptions }) => {
       if (!question.trim()) return;
 
       let sessionId = state.activeSessionId;
@@ -423,6 +433,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           question,
           sessionId,
           ...(isFollowUp ? { useHistory: true } : {}),
+          ...(options?.generateDocument ? { generateDocument: options.generateDocument } : {}),
         });
         dispatch({ type: 'SET_QUERYING', payload: false });
 
@@ -435,7 +446,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               patch: {
                 content: resp.answer,
                 citations: resp.citations,
-                chunksRetrieved: resp.metadata?.chunks_retrieved,
+                chunksRetrieved: resp.metadata?.chunks_retrieved ?? resp.metadata?.chunksRetrieved,
+                artifact: resp.artifact,
                 isStreaming: false,
               },
             },
