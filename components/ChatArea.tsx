@@ -112,7 +112,7 @@ export default function ChatArea() {
             >
               {activeSession?.title ?? 'Legal AI Assistant'}
             </h1>
-            <p className={`text-[11px] ${isDark ? 'text-white' : 'text-charcoal/38'}`}>
+            <p className={`text-[11px] ${isDark ? 'text-white/40' : 'text-charcoal/38'}`}>
               {isQuerying
                 ? 'Searching knowledge base…'
                 : activeSession
@@ -137,7 +137,7 @@ export default function ChatArea() {
             onClick={createSession}
             className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[12px] font-medium border transition-all duration-150
               ${isDark
-                ? 'border-white/10 text-white hover:text-white/70 hover:border-white hover:bg-black'
+                ? 'border-white/10 text-white/55 hover:text-white/85 hover:border-white/22 hover:bg-white/5'
                 : 'border-charcoal/12 text-charcoal/45 hover:text-charcoal/70 hover:border-charcoal/22 hover:bg-charcoal/4'
               }`}
           >
@@ -164,9 +164,9 @@ export default function ChatArea() {
           <div className="flex flex-col items-center justify-center min-h-full px-6 py-12">
             <div className="w-full max-w-2xl">
               {/* Hero */}
-              <div className="text-center mb-10">
-                <div className={`inline-flex w-14 h-14 rounded-2xl items-center justify-center mb-5 shadow-lg
-                  ${isDark ? 'bg-white/12 border border-white/10' : 'bg-white border border-charcoal/10 shadow-md'}`}
+              <div className="pg-rise text-center mb-10">
+                <div className={`inline-flex w-14 h-14 rounded-2xl items-center justify-center mb-5
+                  ${isDark ? 'bg-[#1c1c1e] border border-white/10' : 'bg-white border border-charcoal/10'}`}
                 >
                   <svg width="26" height="26" viewBox="0 0 32 32" fill="none">
                     <path d="M16 3L3 9.5l13 6.5 13-6.5L16 3z" fill={isDark ? 'rgba(255,255,255,0.85)' : '#2C2C2E'} />
@@ -181,7 +181,7 @@ export default function ChatArea() {
                   P&G Legal AI
                 </h2>
                 <p className={`text-[13.5px] leading-relaxed max-w-sm mx-auto
-                  ${isDark ? 'text-white' : 'text-charcoal/50'}`}
+                  ${isDark ? 'text-white/55' : 'text-charcoal/50'}`}
                 >
                   Ask anything from the Perchstone & Graeys knowledge base.
                   Get answers grounded in documents, with cited sources.
@@ -197,18 +197,19 @@ export default function ChatArea() {
                       if (!activeSession) createSession();
                       setTimeout(() => sendMessage(card.prompt), 40);
                     }}
+                    style={{ animationDelay: `${120 + i * 60}ms` }}
                     className={`
-                      group flex flex-col items-start gap-3 p-4 rounded-2xl border text-left
-                      transition-all duration-150 hover:-translate-y-0.5
+                      pg-rise group flex flex-col items-start gap-3 p-4 rounded-2xl border text-left
+                      transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99]
                       ${isDark
-                        ? 'bg-white/12 border-white hover:bg-white/12 hover:border-white hover:shadow-lg hover:shadow-black/30'
-                        : 'bg-white border-charcoal/8 hover:border-charcoal/18 hover:shadow-md hover:shadow-charcoal/6'
+                        ? 'bg-[#1c1c1e] border-white/8 hover:border-white/18 hover:bg-[#222224]'
+                        : 'bg-white border-charcoal/8 hover:border-charcoal/18'
                       }
                     `}
                   >
-                    <div className={`p-2 rounded-xl transition-colors
+                    <div className={`p-2 rounded-xl transition-colors duration-200
                       ${isDark
-                        ? 'bg-white text-white/12 '
+                        ? 'bg-white/8 text-white/60 group-hover:bg-white/12 group-hover:text-white/85'
                         : 'bg-charcoal/6 text-charcoal/55 group-hover:bg-charcoal/10 group-hover:text-charcoal/80'
                       }`}
                     >
@@ -216,12 +217,12 @@ export default function ChatArea() {
                     </div>
                     <div>
                       <p className={`text-[13px] font-semibold mb-0.5
-                        ${isDark ? 'text-white' : 'text-charcoal/85'}`}
+                        ${isDark ? 'text-white/85' : 'text-charcoal/85'}`}
                       >
                         {card.label}
                       </p>
                       <p className={`text-[12px] leading-relaxed
-                        ${isDark ? 'text-white' : 'text-charcoal/48'}`}
+                        ${isDark ? 'text-white/45' : 'text-charcoal/48'}`}
                       >
                         {card.description}
                       </p>

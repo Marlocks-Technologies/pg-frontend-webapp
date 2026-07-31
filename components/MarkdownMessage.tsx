@@ -44,7 +44,7 @@ function renderInline(text: string, isDark: boolean): React.ReactNode[] {
         <code
           key={i}
           className={`px-1.5 py-0.5 rounded text-[12px] font-mono
-            ${isDark ? 'bg-white/8 text-amber-300' : 'bg-charcoal/6 text-charcoal'}`}
+            ${isDark ? 'bg-white/8 text-white/85' : 'bg-charcoal/6 text-charcoal'}`}
         >
           {part.slice(1, -1)}
         </code>
