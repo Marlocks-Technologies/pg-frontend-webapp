@@ -2,8 +2,79 @@
 
 import { useState } from 'react';
 import { Message } from '@/lib/chatStore';
-import { Citation } from '@/lib/api';
+import { Citation, GeneratedArtifact, artifactDownloadUrl } from '@/lib/api';
 import MarkdownMessage from './MarkdownMessage';
+
+// ─── Generated artifact card ──────────────────────────────────────────────────
+
+const FORMAT_LABELS: Record<string, string> = {
+  docx: 'DOC', pdf: 'PDF', pptx: 'PPT', xlsx: 'XLS',
+};
+
+function formatBytes(bytes?: number): string | null {
+  if (bytes === undefined || bytes === null) return null;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ArtifactCard({ artifact, isDark }: { artifact: GeneratedArtifact; isDark: boolean }) {
+  const label = FORMAT_LABELS[artifact.format] ?? artifact.format.toUpperCase().slice(0, 4);
+  const size = formatBytes(artifact.sizeBytes);
+  const styledAfter =
+    artifact.styleReference?.nativeTemplateApplied && artifact.styleReference.filename;
+
+  return (
+    <div
+      className={`pg-rise mt-3 flex items-center gap-3 p-3 rounded-lg border
+        ${isDark ? 'bg-white/4 border-white/[0.07]' : 'bg-charcoal/[0.03] border-charcoal/[0.07]'}`}
+    >
+      {/* Format glyph */}
+      <div
+        className={`shrink-0 w-9 h-9 rounded-lg border flex items-center justify-center
+          text-[9px] font-bold tracking-wide
+          ${isDark ? 'border-white/12 text-white/70' : 'border-charcoal/15 text-charcoal/70'}`}
+      >
+        {label}
+      </div>
+
+      {/* Meta */}
+      <div className="flex-1 min-w-0">
+        <p className={`text-[13px] font-semibold truncate
+          ${isDark ? 'text-white/85' : 'text-charcoal/85'}`}
+        >
+          {artifact.filename}
+        </p>
+        <p className={`text-[10px] ${isDark ? 'text-white/40' : 'text-charcoal/40'}`}>
+          {[label, size].filter(Boolean).join(' · ')}
+          {styledAfter ? ` · Styled after ${artifact.styleReference!.filename}` : ''}
+        </p>
+      </div>
+
+      {/* Download — stable route refreshes the signed URL */}
+      <a
+        href={artifactDownloadUrl(artifact.artifactId)}
+        download={artifact.filename}
+        className={`group/dl shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg
+          text-[11px] font-medium transition-all duration-200 active:scale-95
+          ${isDark
+            ? 'bg-white text-[#1c1c1e] hover:bg-white/90'
+            : 'bg-[#2C2C2E] text-white hover:bg-[#3a3a3c]'}`}
+      >
+        <svg
+          width="11" height="11" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+          className="transition-transform duration-200 group-hover/dl:translate-y-[1px]"
+        >
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7,10 12,15 17,10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Download
+      </a>
+    </div>
+  );
+}
 
 // ─── Citations Panel ──────────────────────────────────────────────────────────
 
@@ -161,6 +232,11 @@ export default function MessageBubble({
                 />
               )}
             </>
+          )}
+
+          {/* Generated artifact */}
+          {!isUser && !message.isError && message.artifact && (
+            <ArtifactCard artifact={message.artifact} isDark={isDark} />
           )}
 
           {/* Citations */}
