@@ -89,3 +89,181 @@
     transition: none;
   }
 }
+
+/* ── Hairline sheen (chat input) ─────────────────────────────────────────────
+
+   The input's 1px hairline carries a travelling band of monochrome light.
+   Idle-focused it circles slowly; while the instrument is thinking it
+   quickens and brightens. The ring is a conic gradient clipped to the
+   border with a mask-composite exclusion, so only the hairline lights up —
+   no halo, no glow, no chroma.
+*/
+
+@property --pg-sheen-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes pg-sheen-spin {
+  to { --pg-sheen-angle: 360deg; }
+}
+
+.pg-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  background: conic-gradient(
+    from var(--pg-sheen-angle),
+    transparent 0deg,
+    var(--pg-sheen-color) 55deg,
+    transparent 110deg,
+    transparent 175deg,
+    var(--pg-sheen-color-faint) 230deg,
+    transparent 285deg
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  animation: pg-sheen-spin 5s linear infinite paused;
+}
+
+.pg-input-frame:focus-within .pg-sheen {
+  opacity: 1;
+  animation-play-state: running;
+}
+
+.pg-input-frame[data-thinking='true'] .pg-sheen {
+  opacity: 1;
+  animation-play-state: running;
+  animation-duration: 1.6s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pg-sheen {
+    animation: none;
+    background: none;
+  }
+}
+
+/* ── Message entrance ────────────────────────────────────────────────────────── */
+
+@keyframes pg-message-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.pg-message-in {
+  animation: pg-message-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ── Staggered rise (chips, starter cards, hero) ─────────────────────────────── */
+
+@keyframes pg-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.pg-rise {
+  animation: pg-rise 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ── Panel entrance (search results) ─────────────────────────────────────────── */
+
+@keyframes pg-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.pg-panel-in {
+  animation: pg-panel-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ── Collapsible expand (citations) ──────────────────────────────────────────── */
+
+.pg-expand {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pg-expand[data-open='true'] {
+  grid-template-rows: 1fr;
+}
+
+.pg-expand > * {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ── Micro feedback ──────────────────────────────────────────────────────────── */
+
+@keyframes pg-pop {
+  0% { transform: scale(0.6); }
+  60% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+
+.pg-pop {
+  animation: pg-pop 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Thinking dots — a soft wave, not a bounce */
+@keyframes pg-dot {
+  0%, 60%, 100% {
+    transform: none;
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+.pg-dot {
+  animation: pg-dot 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pg-message-in,
+  .pg-rise,
+  .pg-panel-in,
+  .pg-pop {
+    animation: none;
+  }
+  .pg-expand {
+    transition: none;
+  }
+  /* State feedback stays, movement goes: opacity-only pulse */
+  .pg-dot {
+    animation: pg-dot-still 1.2s ease-in-out infinite;
+  }
+}
+
+@keyframes pg-dot-still {
+  0%, 60%, 100% { opacity: 0.35; }
+  30% { opacity: 1; }
+}
