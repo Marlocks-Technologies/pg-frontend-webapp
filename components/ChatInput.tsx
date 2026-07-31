@@ -9,7 +9,7 @@ import {
   CSSProperties,
 } from 'react';
 import { useChatStore } from '@/lib/chatStore';
-import { documentSearch, SearchResult } from '@/lib/api';
+import { documentSearch, listDocuments, DocumentSummary, SearchResult } from '@/lib/api';
 
 // ─── Suggested prompts ────────────────────────────────────────────────────────
 
@@ -19,6 +19,19 @@ const SUGGESTIONS = [
   'What is the process for trademark registration?',
   'Summarise employee rights under the Labour Act',
 ];
+
+// ─── Document generation options ──────────────────────────────────────────────
+
+const GEN_FORMATS: Array<{ value: string | null; label: string }> = [
+  { value: null,   label: 'Auto' },
+  { value: 'docx', label: 'Word' },
+  { value: 'pdf',  label: 'PDF' },
+  { value: 'pptx', label: 'Slides' },
+  { value: 'xlsx', label: 'Sheet' },
+];
+
+// Only native Office formats can serve as house-style templates
+const NATIVE_TEMPLATE_EXT = /\.(docx|pptx|xlsx)$/i;
 
 // ─── Search results panel ─────────────────────────────────────────────────────
 
@@ -123,7 +136,29 @@ export default function ChatInput() {
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
 
+  const [isGenerateMode, setIsGenerateMode] = useState(false);
+  const [genFormat, setGenFormat] = useState<string | null>(null); // null = Auto
+  const [refDocId, setRefDocId] = useState<string | null>(null);
+  const [refDocs, setRefDocs] = useState<DocumentSummary[] | null>(null); // null = not loaded
+  const [refDocsFailed, setRefDocsFailed] = useState(false);
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const toggleGenerateMode = () => {
+    setIsGenerateMode(v => {
+      const next = !v;
+      if (next) {
+        setIsSearchMode(false);
+        setSearchResults(null);
+        if (refDocs === null && !refDocsFailed) {
+          listDocuments()
+            .then(res => setRefDocs(res.documents.filter(d => NATIVE_TEMPLATE_EXT.test(d.filename))))
+            .catch(() => setRefDocsFailed(true));
+        }
+      }
+      return next;
+    });
+  };
 
   // Auto-resize textarea
   const resize = useCallback((el: HTMLTextAreaElement) => {
@@ -153,7 +188,17 @@ export default function ChatInput() {
       }
     } else {
       if (isQuerying) return;
-      await sendMessage(q);
+      await sendMessage(
+        q,
+        isGenerateMode
+          ? {
+              generateDocument: {
+                ...(genFormat ? { format: genFormat } : {}),
+                ...(refDocId ? { referenceDocumentId: refDocId } : {}),
+              },
+            }
+          : undefined
+      );
       setValue('');
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
@@ -182,8 +227,58 @@ export default function ChatInput() {
         onClose={() => { setSearchResults(null); setIsSearchMode(false); }}
       />
 
-      {/* Suggested prompts (only when input empty + not searching) */}
-      {!value && !searchResults && !isSearching && (
+      {/* Generation options */}
+      {isGenerateMode && (
+        <div className="pg-panel-in flex items-center gap-2 mb-3 flex-wrap">
+          {/* Format picker */}
+          <div className={`flex items-center rounded-full border p-0.5
+            ${isDark ? 'border-white/10' : 'border-charcoal/12'}`}
+          >
+            {GEN_FORMATS.map(f => (
+              <button
+                key={f.label}
+                onClick={() => setGenFormat(f.value)}
+                className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors duration-150
+                  ${genFormat === f.value
+                    ? isDark ? 'bg-white/12 text-white/90' : 'bg-charcoal/10 text-charcoal/90'
+                    : isDark ? 'text-white/40 hover:text-white/70' : 'text-charcoal/40 hover:text-charcoal/70'
+                  }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Reference document picker */}
+          <select
+            value={refDocId ?? ''}
+            onChange={e => setRefDocId(e.target.value || null)}
+            disabled={refDocsFailed || (refDocs !== null && refDocs.length === 0)}
+            className={`text-[11px] px-2.5 py-1.5 rounded-full border bg-transparent outline-none
+              transition-colors duration-150 max-w-[220px] truncate
+              ${isDark
+                ? 'border-white/10 text-white/55 hover:border-white/20 disabled:text-white/25'
+                : 'border-charcoal/12 text-charcoal/55 hover:border-charcoal/22 disabled:text-charcoal/25'
+              }`}
+          >
+            <option value="">
+              {refDocsFailed
+                ? 'Style match unavailable'
+                : refDocs === null
+                  ? 'Match style — loading…'
+                  : refDocs.length === 0
+                    ? 'No template documents'
+                    : 'Match style: none'}
+            </option>
+            {(refDocs ?? []).map(d => (
+              <option key={d.documentId} value={d.documentId}>{d.filename}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Suggested prompts (only when input empty + not searching/generating) */}
+      {!value && !searchResults && !isSearching && !isGenerateMode && (
         <div className="flex gap-2 mb-3 flex-wrap">
           {SUGGESTIONS.map((s, i) => (
             <button
@@ -227,6 +322,7 @@ export default function ChatInput() {
         <button
           onClick={() => {
             setIsSearchMode(v => !v);
+            setIsGenerateMode(false);
             setSearchResults(null);
           }}
           title={isSearchMode ? 'Switch to chat' : 'Search documents'}
@@ -245,6 +341,26 @@ export default function ChatInput() {
           </svg>
         </button>
 
+        {/* Generate toggle */}
+        <button
+          onClick={toggleGenerateMode}
+          title={isGenerateMode ? 'Switch to chat' : 'Generate a document'}
+          className={`shrink-0 mb-0.5 p-2 rounded-xl transition-all duration-150 active:scale-90
+            ${isGenerateMode
+              ? isDark ? 'bg-white/12 text-white/85' : 'bg-charcoal/10 text-charcoal'
+              : isDark
+                ? 'text-white/35 hover:text-white/70 hover:bg-white/6'
+                : 'text-charcoal/28 hover:text-charcoal/60 hover:bg-charcoal/5'
+            }`}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14,2 14,8 20,8"/>
+            <line x1="12" y1="12" x2="12" y2="18"/>
+            <line x1="9" y1="15" x2="15" y2="15"/>
+          </svg>
+        </button>
+
         {/* Textarea */}
         <textarea
           ref={textareaRef}
@@ -252,7 +368,13 @@ export default function ChatInput() {
           onChange={handleChange}
           onKeyDown={handleKey}
           disabled={isQuerying && !isSearchMode}
-          placeholder={isSearchMode ? 'Search the document knowledge base…' : 'Ask a legal question…'}
+          placeholder={
+            isSearchMode
+              ? 'Search the document knowledge base…'
+              : isGenerateMode
+                ? 'Describe the document to generate…'
+                : 'Ask a legal question…'
+          }
           rows={1}
           className={`
             flex-1 resize-none bg-transparent text-[13.5px] leading-[1.6] outline-none
@@ -263,11 +385,11 @@ export default function ChatInput() {
         />
 
         {/* Mode label */}
-        {isSearchMode && (
+        {(isSearchMode || isGenerateMode) && (
           <span className={`pg-pop shrink-0 mb-1 text-[10px] font-bold tracking-widest uppercase
             ${isDark ? 'text-white/45' : 'text-charcoal/40'}`}
           >
-            SEARCH
+            {isSearchMode ? 'SEARCH' : 'GENERATE'}
           </span>
         )}
 

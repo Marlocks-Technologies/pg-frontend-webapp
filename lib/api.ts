@@ -23,6 +23,33 @@ export interface Citation {
   metadata?: Record<string, unknown>;
 }
 
+// ─── Generated document artifacts ─────────────────────────────────────────────
+
+export interface ArtifactStyleReference {
+  documentId: string;
+  filename?: string;
+  nativeTemplateApplied?: boolean;
+}
+
+export interface GeneratedArtifact {
+  artifactId: string;
+  filename: string;
+  format: string;                 // "docx" | "pdf" | "pptx" | "xlsx"
+  mimeType?: string;
+  sizeBytes?: number;
+  title?: string;
+  generatedAt?: string;
+  styleReference?: ArtifactStyleReference;
+  downloadUrl?: string;           // short-lived signed URL
+  downloadPath?: string;          // stable path, e.g. /documents/generated/{id}/download
+  downloadExpiresAt?: string;
+}
+
+/** Stable download route — refreshes the S3 signature and 302-redirects. */
+export function artifactDownloadUrl(artifactId: string): string {
+  return `${BASE_URL}/documents/generated/${encodeURIComponent(artifactId)}/download`;
+}
+
 // ─── 1. Health Check  GET /health ────────────────────────────────────────────
 
 export interface HealthResponse {
@@ -41,19 +68,28 @@ export async function getHealth(): Promise<HealthResponse> {
 
 // ─── 2. Chat Query  POST /chat/query ─────────────────────────────────────────
 
+export interface GenerateDocumentOptions {
+  format?: string;                // "docx" | "pdf" | "pptx" | "xlsx" — omit for auto
+  referenceDocumentId?: string;
+  topK?: number;
+}
+
 export interface ChatQueryRequest {
   question: string;
   sessionId: string;
   topK?: number;
   useHistory?: boolean;
   filters?: Record<string, string>;
+  generateDocument?: GenerateDocumentOptions;
 }
 
 export interface ChatQueryResponse {
   answer: string;
   citations: Citation[];
+  artifact?: GeneratedArtifact;
   metadata?: {
     chunks_retrieved?: number;
+    chunksRetrieved?: number;     // generation responses use camelCase
     model?: string;
     processing_time_ms?: number;
   };
@@ -66,9 +102,10 @@ export async function chatQuery(
     question: payload.question,
     sessionId: payload.sessionId,
   };
-  if (payload.topK !== undefined)       body.topK       = payload.topK;
-  if (payload.useHistory !== undefined) body.useHistory = payload.useHistory;
-  if (payload.filters !== undefined)    body.filters    = payload.filters;
+  if (payload.topK !== undefined)             body.topK             = payload.topK;
+  if (payload.useHistory !== undefined)       body.useHistory       = payload.useHistory;
+  if (payload.filters !== undefined)          body.filters          = payload.filters;
+  if (payload.generateDocument !== undefined) body.generateDocument = payload.generateDocument;
 
   const res = await fetch(`${BASE_URL}/chat/query`, {
     method: 'POST',
