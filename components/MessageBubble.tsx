@@ -32,7 +32,7 @@ function ArtifactCard({ artifact, isDark }: { artifact: GeneratedArtifact; isDar
       {/* Format glyph */}
       <div
         className={`shrink-0 w-9 h-9 rounded-lg border flex items-center justify-center
-          text-[9px] font-bold tracking-wide
+          text-[10px] font-bold tracking-wide
           ${isDark ? 'border-white/12 text-white/70' : 'border-charcoal/15 text-charcoal/70'}`}
       >
         {label}
