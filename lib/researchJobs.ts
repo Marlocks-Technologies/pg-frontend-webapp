@@ -350,3 +350,17 @@ export function __seedForTests(records: ResearchJobRecord[]): void {
     // Ignored in tests that deliberately break storage.
   }
 }
+
+/**
+ * Test-only: reports the size of the module-private bookkeeping maps without
+ * exposing their contents. Used to detect leaked entries for jobIds that no
+ * longer exist in `jobs` (e.g. a cancelled job whose in-flight rejecting
+ * fetch still runs its catch branch).
+ */
+export function __getInternalStateSizesForTests(): {
+  failures: number;
+  delays: number;
+  timers: number;
+} {
+  return { failures: failures.size, delays: delays.size, timers: timers.size };
+}

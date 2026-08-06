@@ -621,12 +621,15 @@ describe('reload simulation', () => {
   });
 });
 
+import { __getInternalStateSizesForTests } from '@/lib/researchJobs';
+
 describe('cancellation during error paths', () => {
   it('cancel during rejecting fetch: no state leak in failures/delays maps', async () => {
     let pollCount = 0;
-    let rejectStatusFetch = false;
+    // Set only once poll 2's fetch is in flight, so the test controls exactly
+    // when the rejection settles relative to the cancellation.
+    let rejectSecondPoll: ((reason?: unknown) => void) | undefined;
 
-    // Use a deterministic jobId so we can verify state isn't leaked.
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (String(url).endsWith('/api/research')) {
         return { ok: true, status: 200, json: async () => ({
@@ -634,8 +637,12 @@ describe('cancellation during error paths', () => {
         }) } as Response;
       }
       pollCount++;
-      if (rejectStatusFetch) {
-        throw new TypeError('network error');
+      if (pollCount === 2) {
+        // Hold this fetch open. poll() suspends here at `await getLegalResearchJob`
+        // until the test explicitly rejects it below.
+        return new Promise<Response>((_resolve, reject) => {
+          rejectSecondPoll = reject;
+        });
       }
       return { ok: true, status: 200, json: async () => ({
         jobId: 'job-test', status: 'RUNNING',
@@ -648,41 +655,32 @@ describe('cancellation during error paths', () => {
     });
     expect(job1.jobId).toBe('job-test');
 
-    // Let first poll fire and succeed.
+    // Poll 1 fires at 3000ms and succeeds (QUEUED -> RUNNING), scheduling poll 2
+    // at +4050ms per the verified backoff schedule (3000, 7050, ...).
     await vi.advanceTimersByTimeAsync(3_000);
     expect(pollCount).toBe(1);
 
-    // Make next fetch reject.
-    rejectStatusFetch = true;
-    await vi.advanceTimersByTimeAsync(5_000); // Poll 2 at 7050ms fires and fails
+    // Poll 2 fires at the 7050ms mark and hangs on our controlled promise —
+    // poll() is now suspended awaiting getLegalResearchJob, not yet in the catch.
+    await vi.advanceTimersByTimeAsync(4_050);
     expect(pollCount).toBe(2);
+    expect(rejectSecondPoll).toBeDefined();
 
-    // Cancel the job while the failure happened.
+    // Cancel WHILE the rejecting fetch is still in flight. This deletes the
+    // record and clears its Map entries before the catch branch ever runs.
     cancelResearchJob(job1.jobId);
     expect(getSessionJob('sess-1')).toBeUndefined();
+    expect(__getInternalStateSizesForTests()).toEqual({ failures: 0, delays: 0, timers: 0 });
 
-    // If the catch-branch guard is broken, failures/delays maps still have entries for 'job-test'.
-    // Now drop this session and submit a new one with the same jobId to reuse that polluted state.
-    dropSessionJobs('sess-1');
-    initResearchJobs(['sess-2']);
+    // Now let the pending fetch reject, and flush microtasks so poll()'s catch
+    // branch runs to completion against a record that's already gone.
+    rejectSecondPoll?.(new TypeError('network error'));
+    await vi.advanceTimersByTimeAsync(0);
 
-    rejectStatusFetch = false;
-    const job2 = await submitResearchJob({
-      sessionId: 'sess-2', messageId: 'msg-2', question: 'Q2',
-    });
-    expect(job2.jobId).toBe('job-test'); // Same jobId is reused
-
-    // If state leaked from job1, job2's delay counter would be pre-incremented.
-    // Job2's first poll should fire at POLL_MIN_MS (3000ms from submission).
-    const beforeAdvance = pollCount;
-    await vi.advanceTimersByTimeAsync(2_000);
-    expect(pollCount).toBe(beforeAdvance); // No poll yet (poll 3)
-
-    await vi.advanceTimersByTimeAsync(1_100); // Now at 3100ms from submission
-    expect(pollCount).toBe(beforeAdvance + 1); // Poll fires at the right time
-
-    // If state had leaked, poll would have been scheduled with a pre-incremented delay.
-    // The test would fail here because poll wouldn't have fired yet.
+    // The catch branch must bail without recreating any bookkeeping for a
+    // jobId that no longer exists in `jobs` — otherwise this is a permanent
+    // leak, since nothing else is ever keyed off a deleted jobId to clean it up.
+    expect(__getInternalStateSizesForTests()).toEqual({ failures: 0, delays: 0, timers: 0 });
   });
 });
 
