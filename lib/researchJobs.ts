@@ -188,6 +188,10 @@ async function poll(jobId: string): Promise<void> {
     return;
   }
 
+  // Re-check the job after the network call — it may have been cancelled or dropped.
+  const fresh = jobs[jobId];
+  if (!fresh || !isActive(fresh)) return;
+
   if (remote.status === 'COMPLETED') {
     if (!remote.result?.answer) {
       fail(jobId, 'The research job finished without returning an opinion.');
@@ -195,7 +199,7 @@ async function poll(jobId: string): Promise<void> {
     }
     clearTimer(jobId);
     const completed: ResearchJobRecord = {
-      ...job, status: 'COMPLETED', updatedAt: Date.now(),
+      ...fresh, status: 'COMPLETED', updatedAt: Date.now(),
     };
     jobs[jobId] = completed;
     commit();
@@ -208,8 +212,8 @@ async function poll(jobId: string): Promise<void> {
     return;
   }
 
-  if (remote.status !== job.status) {
-    jobs[jobId] = { ...job, status: remote.status, updatedAt: Date.now() };
+  if (remote.status !== fresh.status) {
+    jobs[jobId] = { ...fresh, status: remote.status, updatedAt: Date.now() };
     commit();
   }
   schedule(jobId, nextDelay(jobId));
@@ -251,10 +255,16 @@ export async function submitResearchJob(input: {
  * Keep polling the SAME job after a stall. The job is still running on the
  * backend and has already been paid for. A FAILED job cannot be resumed —
  * the caller must submit a new one via submitResearchJob.
+ * Does not resume if the session has a different active job (cap enforcement).
  */
 export function resumeResearchJob(jobId: string): void {
   const job = jobs[jobId];
   if (!job || job.status !== 'STALLED') return;
+
+  // Check if the session has a different active job (would violate the one-job cap).
+  const currentJob = getSessionJob(job.sessionId);
+  if (currentJob && currentJob.jobId !== jobId && isActive(currentJob)) return;
+
   failures.delete(jobId);
   delays.delete(jobId);
   jobs[jobId] = {
@@ -320,9 +330,6 @@ export function __resetForTests(): void {
   jobs = {};
   listeners.clear();
   started = false;
-  if (typeof window !== 'undefined') {
-    localStorage.clear();
-  }
 }
 
 export function __seedForTests(records: ResearchJobRecord[]): void {

@@ -248,6 +248,7 @@ describe('submitResearchJob backoff schedule', () => {
     // Reset and test that gap doesn't exceed cap: advance more and verify poll count
     // increases at a rate consistent with 12000ms intervals (the cap).
     __resetForTests();
+    localStorage.clear();
     pollCount = 0;
 
     initResearchJobs(['sess-1']);
@@ -453,5 +454,169 @@ describe('seen-tracking and cleanup', () => {
 
     dropSessionJobs('sess-1');
     expect(getSessionJob('sess-1')).toBeUndefined();
+  });
+});
+
+describe('cancellation during in-flight requests', () => {
+  it('cancel during poll: record stays gone, no completed event fires, no reschedule', async () => {
+    let pollCount = 0;
+    const completions: string[] = [];
+    subscribeResearchJobs(event => {
+      if (event.kind === 'completed') completions.push(event.result.answer);
+    });
+
+    // Stub that lets us intercept after the fetch starts but before it resolves.
+    let resolveStatusFetch: ((value: unknown) => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).endsWith('/api/research')) {
+        return { ok: true, status: 200, json: async () => ({
+          success: true, jobId: 'job-9', status: 'QUEUED', statusPath: '/x',
+        }) } as Response;
+      }
+      // Status check — hang until we resolve it.
+      pollCount++;
+      await new Promise(r => { resolveStatusFetch = r; });
+      return { ok: true, status: 200, json: async () => ({
+        jobId: 'job-9', status: 'COMPLETED', result: { answer: 'Result', citations: [] },
+      }) } as Response;
+    }));
+
+    initResearchJobs(['sess-1']);
+    await submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q' });
+
+    // Let the first poll fire and hang.
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(pollCount).toBe(1);
+    expect(getSessionJob('sess-1')?.status).toBe('QUEUED');
+
+    // Cancel while the poll is in flight.
+    const job = getSessionJob('sess-1')!;
+    cancelResearchJob(job.jobId);
+    expect(getSessionJob('sess-1')).toBeUndefined();
+
+    // Resolve the hanging fetch.
+    resolveStatusFetch?.({});
+
+    // Let any pending microtasks settle.
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Job must still be gone, no completed event should have fired.
+    expect(getSessionJob('sess-1')).toBeUndefined();
+    expect(completions).toHaveLength(0);
+
+    // No reschedule should have happened, so next poll is forever.
+    await vi.advanceTimersByTimeAsync(100_000);
+    expect(pollCount).toBe(1); // Still just the one
+  });
+
+  it('dropSessionJobs during poll: job stays gone, no completed event, no reschedule', async () => {
+    let pollCount = 0;
+    const completions: string[] = [];
+    subscribeResearchJobs(event => {
+      if (event.kind === 'completed') completions.push(event.result.answer);
+    });
+
+    let resolveStatusFetch: ((value: unknown) => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).endsWith('/api/research')) {
+        return { ok: true, status: 200, json: async () => ({
+          success: true, jobId: 'job-9', status: 'QUEUED', statusPath: '/x',
+        }) } as Response;
+      }
+      pollCount++;
+      await new Promise(r => { resolveStatusFetch = r; });
+      return { ok: true, status: 200, json: async () => ({
+        jobId: 'job-9', status: 'COMPLETED', result: { answer: 'Result', citations: [] },
+      }) } as Response;
+    }));
+
+    initResearchJobs(['sess-1']);
+    await submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q' });
+
+    // Let the first poll fire and hang.
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(pollCount).toBe(1);
+
+    // Drop all jobs for the session while poll is in flight.
+    dropSessionJobs('sess-1');
+    expect(getSessionJob('sess-1')).toBeUndefined();
+
+    // Resolve the hanging fetch.
+    resolveStatusFetch?.({});
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Job must still be gone.
+    expect(getSessionJob('sess-1')).toBeUndefined();
+    expect(completions).toHaveLength(0);
+
+    // No reschedule.
+    await vi.advanceTimersByTimeAsync(100_000);
+    expect(pollCount).toBe(1);
+  });
+});
+
+describe('resume constraints', () => {
+  it('refuses to resume if the session has a different active job', async () => {
+    stubRunning();
+    initResearchJobs(['sess-1']);
+
+    // Submit job A.
+    const jobA = await submitResearchJob({
+      sessionId: 'sess-1', messageId: 'msg-1', question: 'Q1',
+    });
+    const jobIdA = jobA.jobId;
+
+    // Let it stall.
+    await vi.advanceTimersByTimeAsync(21 * 60 * 1000);
+    expect(getSessionJob('sess-1')?.status).toBe('STALLED');
+
+    // Submit job B (now the active job).
+    const jobB = await submitResearchJob({
+      sessionId: 'sess-1', messageId: 'msg-2', question: 'Q2',
+    });
+    const jobIdB = jobB.jobId;
+
+    // B should be the active job now.
+    expect(getSessionJob('sess-1')?.jobId).toBe(jobIdB);
+    expect(getSessionJob('sess-1')?.status).toBe('QUEUED');
+
+    // Try to resume job A — should be refused (no-op that doesn't change state).
+    resumeResearchJob(jobIdA);
+
+    // B should STILL be the active job, and its status should not have changed.
+    const afterResume = getSessionJob('sess-1');
+    expect(afterResume?.jobId).toBe(jobIdB);
+    expect(afterResume?.status).toBe('QUEUED');
+    expect(afterResume?.startedAt).toBe(jobB.startedAt); // startedAt not bumped
+  });
+});
+
+describe('reload simulation', () => {
+  it('persists job across memory reset and re-init', async () => {
+    stubFetch(url =>
+      url.endsWith('/api/research')
+        ? { success: true, jobId: 'job-9', status: 'QUEUED', statusPath: '/x' }
+        : { jobId: 'job-9', status: 'RUNNING' }
+    );
+
+    initResearchJobs(['sess-1']);
+    const submitted = await submitResearchJob({
+      sessionId: 'sess-1', messageId: 'msg-1', question: 'Q',
+    });
+
+    // Simulate a page reload: reset in-memory state but leave localStorage intact.
+    __resetForTests();
+
+    // After reset, the job should be gone from memory.
+    expect(getSessionJob('sess-1')).toBeUndefined();
+
+    // Re-initialize (as the app would on load).
+    initResearchJobs(['sess-1']);
+
+    // The job should have been restored from localStorage.
+    const restored = getSessionJob('sess-1');
+    expect(restored?.jobId).toBe(submitted.jobId);
+    expect(restored?.status).toBe('QUEUED');
+    expect(restored?.question).toBe(submitted.question);
   });
 });
