@@ -2244,12 +2244,18 @@ Add a `researchJob?: ResearchJobRecord` prop and three handlers `onCancelResearc
                 }
                 onCancelResearch={() => msg.researchJobId && cancelResearchJob(msg.researchJobId)}
                 onResumeResearch={() => msg.researchJobId && resumeResearchJob(msg.researchJobId)}
-                onRetryResearch={() =>
-                  runResearch(activeSession!.id, msg.id, msg.researchPrompt?.question ?? msg.content)}
+                onRetryResearch={() => {
+                  const job = msg.researchJobId
+                    ? state.researchJobs.find(j => j.jobId === msg.researchJobId)
+                    : undefined;
+                  if (job) runResearch(activeSession!.id, msg.id, job.question);
+                }}
               />
 ```
 
 Import `cancelResearchJob` and `resumeResearchJob` from `@/lib/researchJobs`.
+
+**The question comes from the job record, never from the message.** By the time a job can fail, `researchPrompt` has been cleared (Task 10 clears it on run) and `message.content` holds the *error text* — retrying with that would submit the error as the question. `ResearchJobRecord.question` is the only surviving copy.
 
 **Note:** `Try again` calls `runResearch`, which submits a *new* job. `Check again` calls `resumeResearchJob`, which keeps polling the same one. These are not interchangeable — resuming a dead job hangs, and resubmitting a live one pays twice.
 
@@ -2591,6 +2597,7 @@ Append to `app/globals.css`:
 
 import { useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/lib/chatStore';
+import { markResearchSeen } from '@/lib/researchJobs';
 
 const DISMISS_MS = 12_000;
 
@@ -2604,6 +2611,14 @@ export default function ResearchToast() {
   const announced = useRef(new Set<string>());
 
   useEffect(() => {
+    // A completion in the session the user is already reading needs no toast —
+    // but it must still be marked seen, or the sidebar keeps an unread dot on
+    // the conversation that is open on screen.
+    const here = researchJobs.find(
+      job => job.status === 'COMPLETED' && !job.seen && job.sessionId === activeSessionId
+    );
+    if (here) markResearchSeen(here.sessionId);
+
     const ready = researchJobs.find(
       job =>
         job.status === 'COMPLETED' &&
