@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  ApiError,
   getLegalResearchJob,
   startLegalResearch,
   type LegalResearchResult,
@@ -36,12 +37,15 @@ const EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
 const POLL_MIN_MS = 3_000;
 const POLL_MAX_MS = 12_000;
 const POLL_BACKOFF = 1.35;
+const STALL_AFTER_MS = 20 * 60 * 1000;
+const MAX_CONSECUTIVE_FAILURES = 5;
 
 let jobs: Record<string, ResearchJobRecord> = {};
 const listeners = new Set<(event: ResearchEvent) => void>();
 let started = false;
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 const delays = new Map<string, number>();
+const failures = new Map<string, number>();
 
 function load(): Record<string, ResearchJobRecord> {
   if (typeof window === 'undefined') return {};
@@ -137,11 +141,41 @@ function fail(jobId: string, message: string): void {
   commit();
 }
 
+function stall(jobId: string, message: string): void {
+  const job = jobs[jobId];
+  if (!job) return;
+  clearTimer(jobId);
+  jobs[jobId] = { ...job, status: 'STALLED', error: message, updatedAt: Date.now() };
+  commit();
+}
+
 async function poll(jobId: string): Promise<void> {
   const job = jobs[jobId];
   if (!job || !isActive(job)) return;
 
-  const remote = await getLegalResearchJob(jobId);
+  if (Date.now() - job.startedAt > STALL_AFTER_MS) {
+    stall(jobId, 'Still running after 20 minutes.');
+    return;
+  }
+
+  let remote;
+  try {
+    remote = await getLegalResearchJob(jobId);
+    failures.delete(jobId);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      fail(jobId, 'This research job is no longer available. It may have expired.');
+      return;
+    }
+    const count = (failures.get(jobId) ?? 0) + 1;
+    failures.set(jobId, count);
+    if (count >= MAX_CONSECUTIVE_FAILURES) {
+      stall(jobId, 'Lost contact with the research service.');
+      return;
+    }
+    schedule(jobId, nextDelay(jobId));
+    return;
+  }
 
   if (remote.status === 'COMPLETED') {
     if (!remote.result?.answer) {
@@ -199,12 +233,34 @@ export async function submitResearchJob(input: {
   return record;
 }
 
+/**
+ * Keep polling the SAME job after a stall. The job is still running on the
+ * backend and has already been paid for. A FAILED job cannot be resumed —
+ * the caller must submit a new one via submitResearchJob.
+ */
+export function resumeResearchJob(jobId: string): void {
+  const job = jobs[jobId];
+  if (!job || job.status !== 'STALLED') return;
+  failures.delete(jobId);
+  delays.delete(jobId);
+  jobs[jobId] = {
+    ...job,
+    status: 'RUNNING',
+    error: undefined,
+    startedAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  commit();
+  schedule(jobId, POLL_MIN_MS);
+}
+
 // ─── Test seams ───────────────────────────────────────────────────────────────
 
 export function __resetForTests(): void {
   timers.forEach(timer => clearTimeout(timer));
   timers.clear();
   delays.clear();
+  failures.clear();
   jobs = {};
   listeners.clear();
   started = false;

@@ -258,3 +258,107 @@ describe('submitResearchJob backoff schedule', () => {
     expect(pollCount).toBeGreaterThanOrEqual(7);
   });
 });
+
+import { resumeResearchJob } from '@/lib/researchJobs';
+
+/** Fetch stub that can fail on demand and reports how many polls happened. */
+function stubFlakyFetch(opts: { failPolls: number; thenStatus?: string }) {
+  let polls = 0;
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (String(url).endsWith('/api/research')) {
+      return { ok: true, status: 200, json: async () => ({
+        success: true, jobId: 'job-9', status: 'QUEUED', statusPath: '/x',
+      }) } as Response;
+    }
+    polls += 1;
+    if (polls <= opts.failPolls) throw new TypeError('network down');
+    return { ok: true, status: 200, json: async () => ({
+      jobId: 'job-9', status: opts.thenStatus ?? 'RUNNING',
+    }) } as Response;
+  }));
+  return { pollCount: () => polls };
+}
+
+describe('failure resilience', () => {
+  it('rides out fewer than five consecutive failures', async () => {
+    stubFlakyFetch({ failPolls: 3 });
+    initResearchJobs(['sess-1']);
+    await submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q' });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getSessionJob('sess-1')?.status).toBe('RUNNING');
+  });
+
+  it('stalls (not fails) after five consecutive failures', async () => {
+    stubFlakyFetch({ failPolls: 99 });
+    initResearchJobs(['sess-1']);
+    await submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q' });
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    const job = getSessionJob('sess-1');
+    expect(job?.status).toBe('STALLED');
+    expect(job?.error).toMatch(/lost contact/i);
+  });
+
+  it('stalls once the job passes twenty minutes', async () => {
+    stubFetch(url =>
+      url.endsWith('/api/research')
+        ? { success: true, jobId: 'job-9', status: 'QUEUED', statusPath: '/x' }
+        : { jobId: 'job-9', status: 'RUNNING' }
+    );
+    initResearchJobs(['sess-1']);
+    await submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q' });
+
+    await vi.advanceTimersByTimeAsync(21 * 60 * 1000);
+    expect(getSessionJob('sess-1')?.status).toBe('STALLED');
+  });
+
+  it('resumes a stalled job by polling the same jobId', async () => {
+    const flaky = stubFlakyFetch({ failPolls: 99 });
+    initResearchJobs(['sess-1']);
+    await submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q' });
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(getSessionJob('sess-1')?.status).toBe('STALLED');
+
+    const before = flaky.pollCount();
+    resumeResearchJob('job-9');
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(flaky.pollCount()).toBeGreaterThan(before);
+    // Same job, not a new submission.
+    expect(getSessionJob('sess-1')?.jobId).toBe('job-9');
+  });
+
+  it('fails permanently on a 404, keeping the record so the user sees why', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).endsWith('/api/research')) {
+        return { ok: true, status: 200, json: async () => ({
+          success: true, jobId: 'job-9', status: 'QUEUED', statusPath: '/x',
+        }) } as Response;
+      }
+      return { ok: false, status: 404, statusText: 'Not Found',
+        json: async () => ({ error: 'Research job not found' }) } as Response;
+    }));
+
+    initResearchJobs(['sess-1']);
+    await submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q' });
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    const job = getSessionJob('sess-1');
+    expect(job?.status).toBe('FAILED');
+    expect(job?.error).toMatch(/no longer available/i);
+  });
+
+  it('surfaces a 429 quota rejection at submit time', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false, status: 429, statusText: 'Too Many Requests',
+      json: async () => ({ error: 'Quota exceeded' }),
+    } as Response)));
+
+    initResearchJobs(['sess-1']);
+    await expect(
+      submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q' })
+    ).rejects.toMatchObject({ status: 429 });
+    expect(getSessionJob('sess-1')).toBeUndefined();
+  });
+});
