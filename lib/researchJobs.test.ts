@@ -79,3 +79,75 @@ describe('test harness storage', () => {
     expect(localStorage.length).toBe(0);
   });
 });
+
+import { submitResearchJob } from '@/lib/researchJobs';
+
+function stubFetch(handler: (url: string, init?: RequestInit) => unknown) {
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    const body = handler(String(url), init);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => body,
+    } as Response;
+  }));
+}
+
+describe('submitResearchJob', () => {
+  it('registers a QUEUED record for the session', async () => {
+    stubFetch(() => ({ success: true, jobId: 'job-9', status: 'QUEUED', statusPath: '/x' }));
+    initResearchJobs(['sess-1']);
+
+    const job = await submitResearchJob({
+      sessionId: 'sess-1', messageId: 'msg-1', question: 'Advise on jurisdiction.',
+    });
+
+    expect(job.status).toBe('QUEUED');
+    expect(job.jobId).toBe('job-9');
+    expect(getSessionJob('sess-1')?.jobId).toBe('job-9');
+  });
+
+  it('moves QUEUED -> RUNNING -> COMPLETED and emits the result once', async () => {
+    const statuses = ['RUNNING', 'COMPLETED'];
+    stubFetch(url => {
+      if (url.endsWith('/api/research')) {
+        return { success: true, jobId: 'job-9', status: 'QUEUED', statusPath: '/x' };
+      }
+      const status = statuses.shift() ?? 'COMPLETED';
+      return status === 'COMPLETED'
+        ? { jobId: 'job-9', status, result: { answer: 'The opinion.', citations: [] } }
+        : { jobId: 'job-9', status };
+    });
+
+    const completions: string[] = [];
+    subscribeResearchJobs(event => {
+      if (event.kind === 'completed') completions.push(event.result.answer);
+    });
+
+    initResearchJobs(['sess-1']);
+    await submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q' });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(getSessionJob('sess-1')?.status).toBe('RUNNING');
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(completions).toEqual(['The opinion.']);
+    expect(getSessionJob('sess-1')?.status).toBe('COMPLETED');
+  });
+
+  it('treats a COMPLETED job with no answer as FAILED', async () => {
+    stubFetch(url =>
+      url.endsWith('/api/research')
+        ? { success: true, jobId: 'job-9', status: 'QUEUED', statusPath: '/x' }
+        : { jobId: 'job-9', status: 'COMPLETED', result: {} }
+    );
+
+    initResearchJobs(['sess-1']);
+    await submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q' });
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    const job = getSessionJob('sess-1');
+    expect(job?.status).toBe('FAILED');
+    expect(job?.error).toMatch(/without returning an opinion/i);
+  });
+});
