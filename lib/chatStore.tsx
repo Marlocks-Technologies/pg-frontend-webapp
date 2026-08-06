@@ -138,7 +138,7 @@ function saveTheme(isDark: boolean) {
 interface ChatState {
   sessions: Session[];
   activeSessionId: string | null;
-  isQuerying: boolean;
+  queryingSessions: Record<string, boolean>;
   isDark: boolean;
   isSidebarOpen: boolean;
   isHydrated: boolean;
@@ -155,7 +155,7 @@ type Action =
   | { type: 'SET_SESSION_TITLE'; payload: { id: string; title: string } }
   | { type: 'ADD_MESSAGE'; payload: { sessionId: string; message: Message } }
   | { type: 'PATCH_MESSAGE'; payload: { sessionId: string; messageId: string; patch: Partial<Message> } }
-  | { type: 'SET_QUERYING'; payload: boolean }
+  | { type: 'SET_QUERYING'; payload: { sessionId: string; value: boolean } }
   | { type: 'LOAD_HISTORY'; payload: { sessionId: string; messages: Message[] } }
   | { type: 'DELETE_SESSION'; payload: string }
   | { type: 'SET_RESEARCH_JOBS'; payload: ResearchJobRecord[] };
@@ -232,8 +232,12 @@ function reducer(state: ChatState, action: Action): ChatState {
         ),
       };
 
-    case 'SET_QUERYING':
-      return { ...state, isQuerying: action.payload };
+    case 'SET_QUERYING': {
+      const next = { ...state.queryingSessions };
+      if (action.payload.value) next[action.payload.sessionId] = true;
+      else delete next[action.payload.sessionId];
+      return { ...state, queryingSessions: next };
+    }
 
     case 'LOAD_HISTORY':
       return {
@@ -287,6 +291,7 @@ interface ChatContextValue {
   toggleDark: () => void;
   toggleSidebar: () => void;
   setSidebar: (v: boolean) => void;
+  isSessionQuerying: (sessionId: string | null) => boolean;
 }
 
 const Ctx = createContext<ChatContextValue | null>(null);
@@ -301,7 +306,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, {
     sessions: [],
     activeSessionId: null,
-    isQuerying: false,
+    queryingSessions: {},
     isDark: true,
     isSidebarOpen: true,
     isHydrated: false,
@@ -500,7 +505,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         },
       });
 
-      dispatch({ type: 'SET_QUERYING', payload: true });
+      dispatch({ type: 'SET_QUERYING', payload: { sessionId, value: true } });
 
       try {
         const isFollowUp = (state.sessions.find(s => s.id === sessionId)?.messageCount ?? 0) > 1;
@@ -510,7 +515,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           ...(isFollowUp ? { useHistory: true } : {}),
           ...(options?.generateDocument ? { generateDocument: options.generateDocument } : {}),
         });
-        dispatch({ type: 'SET_QUERYING', payload: false });
+        dispatch({ type: 'SET_QUERYING', payload: { sessionId, value: false } });
 
         typewrite(sessionId, placeholderId, resp.answer, () => {
           dispatch({
@@ -536,7 +541,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             const job = await submitResearchJob({
               sessionId, messageId: placeholderId, question,
             });
-            dispatch({ type: 'SET_QUERYING', payload: false });
+            dispatch({ type: 'SET_QUERYING', payload: { sessionId, value: false } });
             dispatch({
               type: 'PATCH_MESSAGE',
               payload: {
@@ -545,7 +550,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               },
             });
           } catch (submitError: unknown) {
-            dispatch({ type: 'SET_QUERYING', payload: false });
+            dispatch({ type: 'SET_QUERYING', payload: { sessionId, value: false } });
             dispatch({
               type: 'PATCH_MESSAGE',
               payload: {
@@ -563,7 +568,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        dispatch({ type: 'SET_QUERYING', payload: false });
+        dispatch({ type: 'SET_QUERYING', payload: { sessionId, value: false } });
         dispatch({
           type: 'PATCH_MESSAGE',
           payload: {
@@ -585,8 +590,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const toggleSidebar = useCallback(() => dispatch({ type: 'TOGGLE_SIDEBAR' }), []);
   const setSidebar    = useCallback((v: boolean) => dispatch({ type: 'SET_SIDEBAR', payload: v }), []);
 
+  const isSessionQuerying = useCallback(
+    (sessionId: string | null) => (sessionId ? !!state.queryingSessions[sessionId] : false),
+    [state.queryingSessions]
+  );
+
   return (
-    <Ctx.Provider value={{ state, activeSession, sendMessage, createSession, switchSession, deleteSession, toggleDark, toggleSidebar, setSidebar }}>
+    <Ctx.Provider value={{ state, activeSession, sendMessage, createSession, switchSession, deleteSession, toggleDark, toggleSidebar, setSidebar, isSessionQuerying }}>
       {children}
     </Ctx.Provider>
   );

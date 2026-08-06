@@ -128,8 +128,9 @@ function SearchPanel({
 // ─── Chat Input ───────────────────────────────────────────────────────────────
 
 export default function ChatInput() {
-  const { state, sendMessage } = useChatStore();
-  const { isDark, isQuerying } = state;
+  const { state, sendMessage, isSessionQuerying } = useChatStore();
+  const { isDark } = state;
+  const isQuerying = isSessionQuerying(state.activeSessionId);
 
   const [value, setValue] = useState('');
   const [isSearchMode, setIsSearchMode] = useState(false);

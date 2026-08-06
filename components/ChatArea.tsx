@@ -63,9 +63,10 @@ const STARTER_CARDS = [
 // ─── Chat Area ────────────────────────────────────────────────────────────────
 
 export default function ChatArea() {
-  const { state, activeSession, sendMessage, createSession, toggleSidebar } =
+  const { state, activeSession, sendMessage, createSession, toggleSidebar, isSessionQuerying } =
     useChatStore();
-  const { isDark, isQuerying, isSidebarOpen } = state;
+  const { isDark, isSidebarOpen } = state;
+  const isQuerying = isSessionQuerying(state.activeSessionId);
   const bottomRef = useRef<HTMLDivElement>(null);
   const hasMessages = (activeSession?.messages.length ?? 0) > 0;
 
