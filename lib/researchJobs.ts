@@ -1,0 +1,114 @@
+'use client';
+
+import type { LegalResearchResult } from './api';
+
+export type ResearchStatus =
+  | 'QUEUED'
+  | 'RUNNING'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'STALLED';
+
+export interface ResearchJobRecord {
+  jobId: string;
+  sessionId: string;
+  messageId: string;
+  question: string;
+  status: ResearchStatus;
+  /** Epoch ms. Persisted so the elapsed timer survives a reload. */
+  startedAt: number;
+  updatedAt: number;
+  error?: string;
+  /** false ⇒ the sidebar shows the unread dot. */
+  seen: boolean;
+}
+
+export type ResearchEvent =
+  | { kind: 'changed'; jobs: ResearchJobRecord[] }
+  | { kind: 'completed'; job: ResearchJobRecord; result: LegalResearchResult };
+
+const JOBS_KEY = 'pg-research-jobs';
+const EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
+
+let jobs: Record<string, ResearchJobRecord> = {};
+const listeners = new Set<(event: ResearchEvent) => void>();
+let started = false;
+
+function load(): Record<string, ResearchJobRecord> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(JOBS_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, ResearchJobRecord>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function save(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(JOBS_KEY, JSON.stringify(jobs));
+  } catch {
+    // Quota or private browsing — degrade to in-memory.
+  }
+}
+
+function emit(event: ResearchEvent): void {
+  listeners.forEach(fn => fn(event));
+}
+
+function commit(): void {
+  save();
+  emit({ kind: 'changed', jobs: Object.values(jobs) });
+}
+
+export function subscribeResearchJobs(
+  fn: (event: ResearchEvent) => void
+): () => void {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
+/**
+ * Must be called AFTER the chat store hydrates, with the hydrated session ids.
+ * Called with an empty list it would treat every record as an orphan.
+ */
+export function initResearchJobs(knownSessionIds: string[]): void {
+  if (started) return;
+  started = true;
+
+  jobs = load();
+
+  const known = new Set(knownSessionIds);
+  const now = Date.now();
+  for (const job of Object.values(jobs)) {
+    if (!known.has(job.sessionId) || now - job.startedAt > EXPIRY_MS) {
+      delete jobs[job.jobId];
+    }
+  }
+  commit();
+}
+
+export function getSessionJob(sessionId: string): ResearchJobRecord | undefined {
+  return Object.values(jobs)
+    .filter(job => job.sessionId === sessionId)
+    .sort((a, b) => b.startedAt - a.startedAt)[0];
+}
+
+// ─── Test seams ───────────────────────────────────────────────────────────────
+
+export function __resetForTests(): void {
+  jobs = {};
+  listeners.clear();
+  started = false;
+}
+
+export function __seedForTests(records: ResearchJobRecord[]): void {
+  const seeded: Record<string, ResearchJobRecord> = {};
+  records.forEach(r => { seeded[r.jobId] = r; });
+  try {
+    localStorage.setItem(JOBS_KEY, JSON.stringify(seeded));
+  } catch {
+    // Ignored in tests that deliberately break storage.
+  }
+}
