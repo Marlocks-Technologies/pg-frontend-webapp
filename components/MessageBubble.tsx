@@ -214,7 +214,7 @@ export default function MessageBubble({
             <ThinkingDots isDark={isDark} />
           ) : isUser ? (
             // User messages: plain text, preserve newlines
-            <span className={`whitespace-pre-wrap break-words leading-[1.7] ${isDark ? 'text-white' : 'text-charcoal/88'}`}>
+            <span className="whitespace-pre-wrap break-words leading-[1.7] text-white">
               {message.content}
             </span>
           ) : (
