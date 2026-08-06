@@ -10,11 +10,16 @@ import {
   ReactNode,
 } from 'react';
 import {
+  ApiError,
   chatQuery,
   getChatHistory,
+  runLegalResearch,
   Citation,
   GeneratedArtifact,
   GenerateDocumentOptions,
+  LegalResearchStatus,
+  ResearchPlan,
+  WebSource,
 } from './api';
 
 // ─── Domain Types ─────────────────────────────────────────────────────────────
@@ -29,6 +34,13 @@ export interface Message {
   isStreaming?: boolean;
   isError?: boolean;
   chunksRetrieved?: number;
+  /** Verified web authorities, present only on async legal-research answers. */
+  webSources?: WebSource[];
+  researchPlan?: ResearchPlan;
+  /** Live progress label while an async research job is running. */
+  researchStatus?: string;
+  /** Set once an answer came back through the async research path. */
+  isResearch?: boolean;
 }
 
 export interface Session {
@@ -51,8 +63,9 @@ function serialiseSession(s: Session): unknown {
     messages: s.messages.map(m => ({
       ...m,
       timestamp: m.timestamp.toISOString(),
-      // Never persist streaming state
+      // Never persist in-flight state
       isStreaming: false,
+      researchStatus: undefined,
     })),
   };
 }
@@ -262,7 +275,20 @@ interface ChatContextValue {
 
 const Ctx = createContext<ChatContextValue | null>(null);
 
-const CHAR_DELAY = 6; // ms per 2-char tick — lower = faster
+const CHAR_DELAY = 6; // ms per tick — lower = faster
+// A verified legal opinion runs to tens of thousands of characters. At a fixed
+// 3-char step that would take most of a minute to reveal, so the step scales
+// with length to keep any answer inside this budget.
+const MAX_TYPEWRITE_MS = 6_000;
+
+// ─── Async legal research ─────────────────────────────────────────────────────
+
+const RESEARCH_STATUS_LABELS: Record<LegalResearchStatus, string> = {
+  QUEUED:    'Queued for deep legal research…',
+  RUNNING:   'Searching Nigerian authorities and verifying citations…',
+  COMPLETED: 'Verified. Preparing the opinion…',
+  FAILED:    'Research failed.',
+};
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, {
@@ -356,8 +382,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     (sessionId: string, messageId: string, fullText: string, onComplete?: () => void) => {
       if (timerRef.current) clearInterval(timerRef.current);
       let i = 0;
+      const step = Math.max(3, Math.ceil(fullText.length / (MAX_TYPEWRITE_MS / CHAR_DELAY)));
       timerRef.current = setInterval(() => {
-        i = Math.min(i + 3, fullText.length); // 3 chars per tick
+        i = Math.min(i + step, fullText.length);
         const done = i >= fullText.length;
         dispatch({
           type: 'PATCH_MESSAGE',
@@ -375,6 +402,54 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }, CHAR_DELAY);
     },
     []
+  );
+
+  // ── Async legal research ───────────────────────────────────────────────────
+  // The backend answers authority-heavy questions with 409 researchRequired
+  // rather than risking API Gateway's sync timeout. Pick the job up here so the
+  // hand-off is invisible to the user beyond a progress line.
+  const runResearch = useCallback(
+    async (sessionId: string, placeholderId: string, question: string) => {
+      const patch = (p: Partial<Message>) =>
+        dispatch({ type: 'PATCH_MESSAGE', payload: { sessionId, messageId: placeholderId, patch: p } });
+
+      patch({ isResearch: true, researchStatus: RESEARCH_STATUS_LABELS.QUEUED });
+
+      try {
+        const job = await runLegalResearch(
+          { question, sessionId },
+          { onStatus: j => patch({ researchStatus: RESEARCH_STATUS_LABELS[j.status] }) }
+        );
+
+        const result = job.result;
+        if (!result?.answer) {
+          throw new Error('The research job finished without returning an opinion.');
+        }
+
+        dispatch({ type: 'SET_QUERYING', payload: false });
+        patch({ researchStatus: undefined });
+
+        typewrite(sessionId, placeholderId, result.answer, () => {
+          patch({
+            content: result.answer,
+            citations: result.citations,
+            webSources: result.webSources,
+            researchPlan: result.researchPlan,
+            chunksRetrieved: result.metadata?.chunks_retrieved,
+            isStreaming: false,
+          });
+        });
+      } catch (err: unknown) {
+        dispatch({ type: 'SET_QUERYING', payload: false });
+        patch({
+          content: err instanceof Error ? err.message : 'The research job could not be completed.',
+          researchStatus: undefined,
+          isStreaming: false,
+          isError: true,
+        });
+      }
+    },
+    [typewrite]
   );
 
   // ── Send message ───────────────────────────────────────────────────────────
@@ -454,6 +529,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           });
         });
       } catch (err: unknown) {
+        // Authority-heavy question — continue on the async research route.
+        if (err instanceof ApiError && err.researchRequired) {
+          await runResearch(sessionId, placeholderId, question);
+          return;
+        }
+
         dispatch({ type: 'SET_QUERYING', payload: false });
         dispatch({
           type: 'PATCH_MESSAGE',
@@ -469,7 +550,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         });
       }
     },
-    [state.activeSessionId, state.sessions, typewrite]
+    [state.activeSessionId, state.sessions, typewrite, runResearch]
   );
 
   const toggleDark    = useCallback(() => dispatch({ type: 'TOGGLE_DARK' }), []);
