@@ -314,6 +314,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   });
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeTypeRef = useRef<{
+    sessionId: string; messageId: string; fullText: string;
+  } | null>(null);
 
   // ── Hydrate from localStorage on mount ────────────────────────────────────
   useEffect(() => {
@@ -396,7 +399,25 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // ── Typewriter effect ──────────────────────────────────────────────────────
   const typewrite = useCallback(
     (sessionId: string, messageId: string, fullText: string, onComplete?: () => void) => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      // Never strand a half-typed message: an interrupted one jumps to its end.
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+        const previous = activeTypeRef.current;
+        if (previous && previous.messageId !== messageId) {
+          dispatch({
+            type: 'PATCH_MESSAGE',
+            payload: {
+              sessionId: previous.sessionId,
+              messageId: previous.messageId,
+              patch: { content: previous.fullText, isStreaming: false },
+            },
+          });
+        }
+      }
+
+      activeTypeRef.current = { sessionId, messageId, fullText };
+
       let i = 0;
       const step = Math.max(3, Math.ceil(fullText.length / (MAX_TYPEWRITE_MS / CHAR_DELAY)));
       timerRef.current = setInterval(() => {
@@ -413,6 +434,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         if (done) {
           clearInterval(timerRef.current!);
           timerRef.current = null;
+          activeTypeRef.current = null;
           onComplete?.();
         }
       }, CHAR_DELAY);
