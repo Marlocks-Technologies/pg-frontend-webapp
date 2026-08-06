@@ -5,6 +5,7 @@ import {
   useContext,
   useReducer,
   useCallback,
+  useMemo,
   useRef,
   useEffect,
   ReactNode,
@@ -13,14 +14,20 @@ import {
   ApiError,
   chatQuery,
   getChatHistory,
-  runLegalResearch,
   Citation,
   GeneratedArtifact,
   GenerateDocumentOptions,
-  LegalResearchStatus,
   ResearchPlan,
   WebSource,
 } from './api';
+import {
+  dropSessionJobs,
+  markResearchSeen,
+  submitResearchJob,
+  type ResearchEvent,
+  type ResearchJobRecord,
+} from './researchJobs';
+import { useResearchJobs } from './useResearchJobs';
 
 // ─── Domain Types ─────────────────────────────────────────────────────────────
 
@@ -41,6 +48,8 @@ export interface Message {
   researchStatus?: string;
   /** Set once an answer came back through the async research path. */
   isResearch?: boolean;
+  /** Links this message to its record in the research registry. */
+  researchJobId?: string;
 }
 
 export interface Session {
@@ -132,6 +141,8 @@ interface ChatState {
   isQuerying: boolean;
   isDark: boolean;
   isSidebarOpen: boolean;
+  isHydrated: boolean;
+  researchJobs: ResearchJobRecord[];
 }
 
 type Action =
@@ -146,7 +157,8 @@ type Action =
   | { type: 'PATCH_MESSAGE'; payload: { sessionId: string; messageId: string; patch: Partial<Message> } }
   | { type: 'SET_QUERYING'; payload: boolean }
   | { type: 'LOAD_HISTORY'; payload: { sessionId: string; messages: Message[] } }
-  | { type: 'DELETE_SESSION'; payload: string };
+  | { type: 'DELETE_SESSION'; payload: string }
+  | { type: 'SET_RESEARCH_JOBS'; payload: ResearchJobRecord[] };
 
 function reducer(state: ChatState, action: Action): ChatState {
   switch (action.type) {
@@ -157,7 +169,11 @@ function reducer(state: ChatState, action: Action): ChatState {
         sessions: action.payload.sessions,
         isDark: action.payload.isDark,
         activeSessionId: action.payload.sessions[0]?.id ?? null,
+        isHydrated: true,
       };
+
+    case 'SET_RESEARCH_JOBS':
+      return { ...state, researchJobs: action.payload };
 
     case 'TOGGLE_DARK':
       return { ...state, isDark: !state.isDark };
@@ -281,15 +297,6 @@ const CHAR_DELAY = 6; // ms per tick — lower = faster
 // with length to keep any answer inside this budget.
 const MAX_TYPEWRITE_MS = 6_000;
 
-// ─── Async legal research ─────────────────────────────────────────────────────
-
-const RESEARCH_STATUS_LABELS: Record<LegalResearchStatus, string> = {
-  QUEUED:    'Queued for deep legal research…',
-  RUNNING:   'Searching Nigerian authorities and verifying citations…',
-  COMPLETED: 'Verified. Preparing the opinion…',
-  FAILED:    'Research failed.',
-};
-
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, {
     sessions: [],
@@ -297,6 +304,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     isQuerying: false,
     isDark: true,
     isSidebarOpen: true,
+    isHydrated: false,
+    researchJobs: [],
   });
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -342,6 +351,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   // ── Delete session ─────────────────────────────────────────────────────────
   const deleteSession = useCallback((id: string) => {
+    dropSessionJobs(id);
     dispatch({ type: 'DELETE_SESSION', payload: id });
   }, []);
 
@@ -349,6 +359,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const switchSession = useCallback(
     async (id: string) => {
       dispatch({ type: 'SET_ACTIVE', payload: id });
+      markResearchSeen(id);
       const session = state.sessions.find(s => s.id === id);
       if (!session || session.historyLoaded || session.messages.length > 0) return;
 
@@ -406,51 +417,40 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   // ── Async legal research ───────────────────────────────────────────────────
   // The backend answers authority-heavy questions with 409 researchRequired
-  // rather than risking API Gateway's sync timeout. Pick the job up here so the
-  // hand-off is invisible to the user beyond a progress line.
-  const runResearch = useCallback(
-    async (sessionId: string, placeholderId: string, question: string) => {
-      const patch = (p: Partial<Message>) =>
-        dispatch({ type: 'PATCH_MESSAGE', payload: { sessionId, messageId: placeholderId, patch: p } });
+  // rather than risking API Gateway's sync timeout. The registry owns the
+  // submit/poll/resume lifecycle so the job survives a refresh; here we just
+  // fold its events into the message that asked.
+  const sessionIds = useMemo(() => state.sessions.map(s => s.id), [state.sessions]);
 
-      patch({ isResearch: true, researchStatus: RESEARCH_STATUS_LABELS.QUEUED });
-
-      try {
-        const job = await runLegalResearch(
-          { question, sessionId },
-          { onStatus: j => patch({ researchStatus: RESEARCH_STATUS_LABELS[j.status] }) }
-        );
-
-        const result = job.result;
-        if (!result?.answer) {
-          throw new Error('The research job finished without returning an opinion.');
-        }
-
-        dispatch({ type: 'SET_QUERYING', payload: false });
-        patch({ researchStatus: undefined });
-
-        typewrite(sessionId, placeholderId, result.answer, () => {
-          patch({
-            content: result.answer,
-            citations: result.citations,
-            webSources: result.webSources,
-            researchPlan: result.researchPlan,
-            chunksRetrieved: result.metadata?.chunks_retrieved,
-            isStreaming: false,
-          });
-        });
-      } catch (err: unknown) {
-        dispatch({ type: 'SET_QUERYING', payload: false });
-        patch({
-          content: err instanceof Error ? err.message : 'The research job could not be completed.',
-          researchStatus: undefined,
-          isStreaming: false,
-          isError: true,
-        });
+  useResearchJobs({
+    isHydrated: state.isHydrated,
+    sessionIds,
+    onEvent: useCallback((event: ResearchEvent) => {
+      if (event.kind === 'changed') {
+        dispatch({ type: 'SET_RESEARCH_JOBS', payload: event.jobs });
+        return;
       }
-    },
-    [typewrite]
-  );
+      const { job, result } = event;
+      typewrite(job.sessionId, job.messageId, result.answer, () => {
+        dispatch({
+          type: 'PATCH_MESSAGE',
+          payload: {
+            sessionId: job.sessionId,
+            messageId: job.messageId,
+            patch: {
+              content: result.answer,
+              citations: result.citations,
+              webSources: result.webSources,
+              researchPlan: result.researchPlan,
+              chunksRetrieved: result.metadata?.chunks_retrieved,
+              researchStatus: undefined,
+              isStreaming: false,
+            },
+          },
+        });
+      });
+    }, [typewrite]),
+  });
 
   // ── Send message ───────────────────────────────────────────────────────────
   const sendMessage = useCallback(
@@ -529,9 +529,37 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           });
         });
       } catch (err: unknown) {
-        // Authority-heavy question — continue on the async research route.
+        // Authority-heavy question — hand off to the persistent registry so
+        // the job survives even if this tab reloads.
         if (err instanceof ApiError && err.researchRequired) {
-          await runResearch(sessionId, placeholderId, question);
+          try {
+            const job = await submitResearchJob({
+              sessionId, messageId: placeholderId, question,
+            });
+            dispatch({ type: 'SET_QUERYING', payload: false });
+            dispatch({
+              type: 'PATCH_MESSAGE',
+              payload: {
+                sessionId, messageId: placeholderId,
+                patch: { researchJobId: job.jobId, isResearch: true },
+              },
+            });
+          } catch (submitError: unknown) {
+            dispatch({ type: 'SET_QUERYING', payload: false });
+            dispatch({
+              type: 'PATCH_MESSAGE',
+              payload: {
+                sessionId, messageId: placeholderId,
+                patch: {
+                  content: submitError instanceof Error
+                    ? submitError.message
+                    : 'Deep research could not be started.',
+                  isStreaming: false,
+                  isError: true,
+                },
+              },
+            });
+          }
           return;
         }
 
@@ -550,7 +578,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         });
       }
     },
-    [state.activeSessionId, state.sessions, typewrite, runResearch]
+    [state.activeSessionId, state.sessions, typewrite]
   );
 
   const toggleDark    = useCallback(() => dispatch({ type: 'TOGGLE_DARK' }), []);

@@ -271,68 +271,6 @@ export async function getLegalResearchJob(jobId: string): Promise<LegalResearchJ
   return handleResponse<LegalResearchJob>(res);
 }
 
-export interface RunLegalResearchOptions {
-  onStatus?: (job: LegalResearchJob) => void;
-  signal?: AbortSignal;
-  /** Give up after this long. Defaults to the worker's own 900s ceiling. */
-  timeoutMs?: number;
-}
-
-const POLL_MIN_MS = 3_000;
-const POLL_MAX_MS = 12_000;
-const POLL_DEFAULT_TIMEOUT_MS = 900_000;
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) return reject(new DOMException('Aborted', 'AbortError'));
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    function onAbort() {
-      clearTimeout(timer);
-      reject(new DOMException('Aborted', 'AbortError'));
-    }
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
-}
-
-/**
- * Submit a research job and poll it to a terminal state.
- * Resolves with the COMPLETED job; throws on FAILED, timeout, or abort.
- */
-export async function runLegalResearch(
-  payload: LegalResearchRequest,
-  options: RunLegalResearchOptions = {}
-): Promise<LegalResearchJob> {
-  const { onStatus, signal, timeoutMs = POLL_DEFAULT_TIMEOUT_MS } = options;
-
-  const started = await startLegalResearch(payload);
-  onStatus?.({ jobId: started.jobId, status: 'QUEUED', question: payload.question });
-
-  const deadline = Date.now() + timeoutMs;
-  let delay = POLL_MIN_MS;
-
-  while (Date.now() < deadline) {
-    await sleep(delay, signal);
-    // Back off gradually — most jobs run for minutes, not seconds.
-    delay = Math.min(Math.round(delay * 1.35), POLL_MAX_MS);
-
-    const job = await getLegalResearchJob(started.jobId);
-    onStatus?.(job);
-
-    if (job.status === 'COMPLETED') return job;
-    if (job.status === 'FAILED') {
-      throw new Error(job.error || 'The research job failed.');
-    }
-  }
-
-  throw new Error(
-    'The research is taking longer than expected. It is still running — reopen this ' +
-      `session shortly, or check job ${started.jobId}.`
-  );
-}
-
 // ─── 3. Document Search  POST /chat/search ────────────────────────────────────
 
 export interface SearchRequest {
