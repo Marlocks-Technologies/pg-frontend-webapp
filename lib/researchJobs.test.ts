@@ -362,3 +362,96 @@ describe('failure resilience', () => {
     expect(getSessionJob('sess-1')).toBeUndefined();
   });
 });
+
+import {
+  cancelResearchJob,
+  dropSessionJobs,
+  markResearchSeen,
+  ResearchBusyError,
+} from '@/lib/researchJobs';
+
+function stubRunning() {
+  stubFetch(url =>
+    url.endsWith('/api/research')
+      ? { success: true, jobId: `job-${Math.random().toString(36).slice(2, 6)}`,
+          status: 'QUEUED', statusPath: '/x' }
+      : { jobId: 'job-x', status: 'RUNNING' }
+  );
+}
+
+describe('one job per session', () => {
+  it('refuses a second submission while one is active', async () => {
+    stubRunning();
+    initResearchJobs(['sess-1']);
+    await submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q1' });
+
+    await expect(
+      submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-2', question: 'Q2' })
+    ).rejects.toBeInstanceOf(ResearchBusyError);
+  });
+
+  it('allows a submission in a different session', async () => {
+    stubRunning();
+    initResearchJobs(['sess-1', 'sess-2']);
+    await submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q1' });
+    const second = await submitResearchJob({
+      sessionId: 'sess-2', messageId: 'msg-2', question: 'Q2',
+    });
+    expect(second.sessionId).toBe('sess-2');
+  });
+
+  it('allows a new submission after the previous one is cancelled', async () => {
+    stubRunning();
+    initResearchJobs(['sess-1']);
+    const first = await submitResearchJob({
+      sessionId: 'sess-1', messageId: 'msg-1', question: 'Q1',
+    });
+
+    cancelResearchJob(first.jobId);
+    expect(getSessionJob('sess-1')).toBeUndefined();
+
+    await expect(
+      submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-2', question: 'Q2' })
+    ).resolves.toBeDefined();
+  });
+});
+
+describe('seen-tracking and cleanup', () => {
+  it('removes a completed record once seen, so the unread dot clears', async () => {
+    stubFetch(url =>
+      url.endsWith('/api/research')
+        ? { success: true, jobId: 'job-9', status: 'QUEUED', statusPath: '/x' }
+        : { jobId: 'job-9', status: 'COMPLETED', result: { answer: 'A', citations: [] } }
+    );
+    initResearchJobs(['sess-1']);
+    await submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(getSessionJob('sess-1')?.status).toBe('COMPLETED');
+
+    markResearchSeen('sess-1');
+    expect(getSessionJob('sess-1')).toBeUndefined();
+  });
+
+  it('keeps a failed record after seen so the error stays readable', async () => {
+    stubFetch(url =>
+      url.endsWith('/api/research')
+        ? { success: true, jobId: 'job-9', status: 'QUEUED', statusPath: '/x' }
+        : { jobId: 'job-9', status: 'FAILED', error: 'boom' }
+    );
+    initResearchJobs(['sess-1']);
+    await submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q' });
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    markResearchSeen('sess-1');
+    expect(getSessionJob('sess-1')?.status).toBe('FAILED');
+  });
+
+  it('drops every job for a deleted session', async () => {
+    stubRunning();
+    initResearchJobs(['sess-1']);
+    await submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q' });
+
+    dropSessionJobs('sess-1');
+    expect(getSessionJob('sess-1')).toBeUndefined();
+  });
+});

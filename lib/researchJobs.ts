@@ -32,6 +32,17 @@ export type ResearchEvent =
   | { kind: 'changed'; jobs: ResearchJobRecord[] }
   | { kind: 'completed'; job: ResearchJobRecord; result: LegalResearchResult };
 
+/** Thrown when a session already has an active job. Carries it for the UI. */
+export class ResearchBusyError extends Error {
+  readonly existing: ResearchJobRecord;
+
+  constructor(existing: ResearchJobRecord) {
+    super('This session already has a research job running.');
+    this.name = 'ResearchBusyError';
+    this.existing = existing;
+  }
+}
+
 const JOBS_KEY = 'pg-research-jobs';
 const EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
 const POLL_MIN_MS = 3_000;
@@ -209,6 +220,9 @@ export async function submitResearchJob(input: {
   messageId: string;
   question: string;
 }): Promise<ResearchJobRecord> {
+  const existing = getSessionJob(input.sessionId);
+  if (existing && isActive(existing)) throw new ResearchBusyError(existing);
+
   const response = await startLegalResearch({
     question: input.question,
     sessionId: input.sessionId,
@@ -254,6 +268,48 @@ export function resumeResearchJob(jobId: string): void {
   schedule(jobId, POLL_MIN_MS);
 }
 
+export function cancelResearchJob(jobId: string): void {
+  if (!jobs[jobId]) return;
+  clearTimer(jobId);
+  failures.delete(jobId);
+  delays.delete(jobId);
+  delete jobs[jobId];
+  commit();
+}
+
+/**
+ * Clear the unread dot for a session. Completed records are removed entirely —
+ * their answer already lives in the message. Failed and stalled records stay
+ * so the user can still read the reason and act on it.
+ */
+export function markResearchSeen(sessionId: string): void {
+  let changed = false;
+  for (const job of Object.values(jobs)) {
+    if (job.sessionId !== sessionId) continue;
+    if (job.status === 'COMPLETED') {
+      delete jobs[job.jobId];
+      changed = true;
+    } else if (!job.seen) {
+      jobs[job.jobId] = { ...job, seen: true };
+      changed = true;
+    }
+  }
+  if (changed) commit();
+}
+
+export function dropSessionJobs(sessionId: string): void {
+  let changed = false;
+  for (const job of Object.values(jobs)) {
+    if (job.sessionId !== sessionId) continue;
+    clearTimer(job.jobId);
+    failures.delete(job.jobId);
+    delays.delete(job.jobId);
+    delete jobs[job.jobId];
+    changed = true;
+  }
+  if (changed) commit();
+}
+
 // ─── Test seams ───────────────────────────────────────────────────────────────
 
 export function __resetForTests(): void {
@@ -264,6 +320,9 @@ export function __resetForTests(): void {
   jobs = {};
   listeners.clear();
   started = false;
+  if (typeof window !== 'undefined') {
+    localStorage.clear();
+  }
 }
 
 export function __seedForTests(records: ResearchJobRecord[]): void {
