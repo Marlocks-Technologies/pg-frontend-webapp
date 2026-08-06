@@ -151,3 +151,110 @@ describe('submitResearchJob', () => {
     expect(job?.error).toMatch(/without returning an opinion/i);
   });
 });
+
+describe('submitResearchJob backoff schedule', () => {
+  // Computed from POLL_MIN_MS=3000, POLL_MAX_MS=12000, POLL_BACKOFF=1.35.
+  // Delay after poll N: min(round(prev_delay * 1.35), 12000)
+
+  // Expected poll fire times (cumulative ms from submission):
+  // Poll 1: 3000 (initial delay)
+  // Poll 2: 3000 + 4050 = 7050
+  // Poll 3: 7050 + 5468 = 12518
+  // Poll 4: 12518 + 7382 = 19900
+  // Poll 5: 19900 + 9966 = 29866
+  // Poll 6: 29866 + 12000 = 41866 (delay capped at max)
+
+  it('second poll does not fire before backoff time', async () => {
+    let pollCount = 0;
+    stubFetch(url => {
+      if (url.endsWith('/api/research')) {
+        return { success: true, jobId: 'job-9', status: 'QUEUED', statusPath: '/x' };
+      }
+      // Status check URL — count these
+      pollCount++;
+      return { jobId: 'job-9', status: 'RUNNING' };
+    });
+
+    initResearchJobs(['sess-1']);
+    await submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q' });
+
+    // Advance to just before poll 2 should fire (at 7050ms).
+    // Poll 1 fires at 3000ms, so at 7000ms we should still have only 1 poll.
+    await vi.advanceTimersByTimeAsync(7_000);
+    expect(pollCount).toBe(1);
+
+    // Advance past poll 2 fire time to 7100ms — now poll 2 should have fired.
+    await vi.advanceTimersByTimeAsync(100);
+    expect(pollCount).toBe(2);
+  });
+
+  it('delays grow across successive polls', async () => {
+    let pollCount = 0;
+
+    stubFetch(url => {
+      if (url.endsWith('/api/research')) {
+        return { success: true, jobId: 'job-9', status: 'QUEUED', statusPath: '/x' };
+      }
+      // Status check — each counts as a poll.
+      pollCount++;
+      return { jobId: 'job-9', status: 'RUNNING' };
+    });
+
+    initResearchJobs(['sess-1']);
+    await submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q' });
+
+    // With correct backoff:
+    // Poll 1 at 3000ms, poll 2 at 7050ms, poll 3 at 12518ms
+    // If backoff is broken (flat at POLL_MIN_MS), all would be 3000ms apart:
+    // Poll 1 at 3000ms, poll 2 at 6000ms, poll 3 at 9000ms (poll 3 would fire before 12518)
+
+    // Advance to 10000ms. With broken backoff, poll 3 would already be at 9000ms.
+    // With correct backoff, poll 3 is still pending at 12518ms.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(pollCount).toBe(2); // Only polls 1 and 2 should have fired
+
+    // Advance to 13000ms. Now even correct backoff has reached poll 3.
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(pollCount).toBe(3);
+  });
+
+  it('delay is capped at POLL_MAX_MS', async () => {
+    let pollCount = 0;
+    const POLL_MAX_MS = 12_000;
+
+    stubFetch(url => {
+      if (url.endsWith('/api/research')) {
+        return { success: true, jobId: 'job-9', status: 'QUEUED', statusPath: '/x' };
+      }
+      pollCount++;
+      return { jobId: 'job-9', status: 'RUNNING' };
+    });
+
+    initResearchJobs(['sess-1']);
+    await submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q' });
+
+    // Advance far enough to reach the cap (poll 6 at ~41866ms).
+    await vi.advanceTimersByTimeAsync(42_000);
+
+    // With cap, poll count should be at least 6.
+    // Expected times: 3000, 7050, 12518, 19900, 29866, 41866
+    expect(pollCount).toBeGreaterThanOrEqual(6);
+
+    // Verify that the schedule doesn't jump ahead faster than the cap allows.
+    // The interval between polls should never exceed POLL_MAX_MS + small slack for rounding.
+    // If cap is broken, the 7th poll would come much sooner (backoff keeps growing).
+    // With cap, the gap between 6th and 7th would be exactly 12000ms.
+
+    // Reset and test that gap doesn't exceed cap: advance more and verify poll count
+    // increases at a rate consistent with 12000ms intervals (the cap).
+    __resetForTests();
+    pollCount = 0;
+
+    initResearchJobs(['sess-1']);
+    await submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q' });
+
+    // Advance to poll 6 time (41866ms), then add another 12000ms for poll 7.
+    await vi.advanceTimersByTimeAsync(53_866);
+    expect(pollCount).toBeGreaterThanOrEqual(7);
+  });
+});
