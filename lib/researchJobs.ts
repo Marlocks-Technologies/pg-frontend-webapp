@@ -178,6 +178,9 @@ async function poll(jobId: string): Promise<void> {
       fail(jobId, 'This research job is no longer available. It may have expired.');
       return;
     }
+    // Re-check job existence in error path — it may have been cancelled or dropped.
+    if (!jobs[jobId]) return;
+
     const count = (failures.get(jobId) ?? 0) + 1;
     failures.set(jobId, count);
     if (count >= MAX_CONSECUTIVE_FAILURES) {
@@ -255,15 +258,20 @@ export async function submitResearchJob(input: {
  * Keep polling the SAME job after a stall. The job is still running on the
  * backend and has already been paid for. A FAILED job cannot be resumed —
  * the caller must submit a new one via submitResearchJob.
- * Does not resume if the session has a different active job (cap enforcement).
+ *
+ * Returns true if resumed. Returns false if the job doesn't exist or is not STALLED.
+ * Throws ResearchBusyError if the session already has a different active job
+ * (violates the one-job cap).
  */
-export function resumeResearchJob(jobId: string): void {
+export function resumeResearchJob(jobId: string): boolean {
   const job = jobs[jobId];
-  if (!job || job.status !== 'STALLED') return;
+  if (!job || job.status !== 'STALLED') return false;
 
   // Check if the session has a different active job (would violate the one-job cap).
   const currentJob = getSessionJob(job.sessionId);
-  if (currentJob && currentJob.jobId !== jobId && isActive(currentJob)) return;
+  if (currentJob && currentJob.jobId !== jobId && isActive(currentJob)) {
+    throw new ResearchBusyError(currentJob);
+  }
 
   failures.delete(jobId);
   delays.delete(jobId);
@@ -276,6 +284,7 @@ export function resumeResearchJob(jobId: string): void {
   };
   commit();
   schedule(jobId, POLL_MIN_MS);
+  return true;
 }
 
 export function cancelResearchJob(jobId: string): void {

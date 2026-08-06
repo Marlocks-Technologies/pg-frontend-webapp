@@ -580,8 +580,8 @@ describe('resume constraints', () => {
     expect(getSessionJob('sess-1')?.jobId).toBe(jobIdB);
     expect(getSessionJob('sess-1')?.status).toBe('QUEUED');
 
-    // Try to resume job A — should be refused (no-op that doesn't change state).
-    resumeResearchJob(jobIdA);
+    // Try to resume job A — should throw ResearchBusyError with job B.
+    expect(() => resumeResearchJob(jobIdA)).toThrow(ResearchBusyError);
 
     // B should STILL be the active job, and its status should not have changed.
     const afterResume = getSessionJob('sess-1');
@@ -618,5 +618,141 @@ describe('reload simulation', () => {
     expect(restored?.jobId).toBe(submitted.jobId);
     expect(restored?.status).toBe('QUEUED');
     expect(restored?.question).toBe(submitted.question);
+  });
+});
+
+describe('cancellation during error paths', () => {
+  it('cancel during rejecting fetch: no state leak in failures/delays maps', async () => {
+    let pollCount = 0;
+    let rejectStatusFetch = false;
+
+    // Use a deterministic jobId so we can verify state isn't leaked.
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).endsWith('/api/research')) {
+        return { ok: true, status: 200, json: async () => ({
+          success: true, jobId: 'job-test', status: 'QUEUED', statusPath: '/x',
+        }) } as Response;
+      }
+      pollCount++;
+      if (rejectStatusFetch) {
+        throw new TypeError('network error');
+      }
+      return { ok: true, status: 200, json: async () => ({
+        jobId: 'job-test', status: 'RUNNING',
+      }) } as Response;
+    }));
+
+    initResearchJobs(['sess-1']);
+    const job1 = await submitResearchJob({
+      sessionId: 'sess-1', messageId: 'msg-1', question: 'Q1',
+    });
+    expect(job1.jobId).toBe('job-test');
+
+    // Let first poll fire and succeed.
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(pollCount).toBe(1);
+
+    // Make next fetch reject.
+    rejectStatusFetch = true;
+    await vi.advanceTimersByTimeAsync(5_000); // Poll 2 at 7050ms fires and fails
+    expect(pollCount).toBe(2);
+
+    // Cancel the job while the failure happened.
+    cancelResearchJob(job1.jobId);
+    expect(getSessionJob('sess-1')).toBeUndefined();
+
+    // If the catch-branch guard is broken, failures/delays maps still have entries for 'job-test'.
+    // Now drop this session and submit a new one with the same jobId to reuse that polluted state.
+    dropSessionJobs('sess-1');
+    initResearchJobs(['sess-2']);
+
+    rejectStatusFetch = false;
+    const job2 = await submitResearchJob({
+      sessionId: 'sess-2', messageId: 'msg-2', question: 'Q2',
+    });
+    expect(job2.jobId).toBe('job-test'); // Same jobId is reused
+
+    // If state leaked from job1, job2's delay counter would be pre-incremented.
+    // Job2's first poll should fire at POLL_MIN_MS (3000ms from submission).
+    const beforeAdvance = pollCount;
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(pollCount).toBe(beforeAdvance); // No poll yet (poll 3)
+
+    await vi.advanceTimersByTimeAsync(1_100); // Now at 3100ms from submission
+    expect(pollCount).toBe(beforeAdvance + 1); // Poll fires at the right time
+
+    // If state had leaked, poll would have been scheduled with a pre-incremented delay.
+    // The test would fail here because poll wouldn't have fired yet.
+  });
+});
+
+describe('resume return values and errors', () => {
+  it('returns false for non-existent job', async () => {
+    initResearchJobs(['sess-1']);
+    const result = resumeResearchJob('nonexistent-job');
+    expect(result).toBe(false);
+  });
+
+  it('returns false for non-STALLED job', async () => {
+    stubRunning();
+    initResearchJobs(['sess-1']);
+
+    const job = await submitResearchJob({
+      sessionId: 'sess-1', messageId: 'msg-1', question: 'Q1',
+    });
+
+    // Job is QUEUED, not STALLED.
+    const result = resumeResearchJob(job.jobId);
+    expect(result).toBe(false);
+  });
+
+  it('throws ResearchBusyError if session has a different active job', async () => {
+    stubRunning();
+    initResearchJobs(['sess-1']);
+
+    const jobA = await submitResearchJob({
+      sessionId: 'sess-1', messageId: 'msg-1', question: 'Q1',
+    });
+
+    // Let it stall.
+    await vi.advanceTimersByTimeAsync(21 * 60 * 1000);
+    expect(getSessionJob('sess-1')?.status).toBe('STALLED');
+
+    // Submit job B (now the active job).
+    const jobB = await submitResearchJob({
+      sessionId: 'sess-1', messageId: 'msg-2', question: 'Q2',
+    });
+
+    // Try to resume job A — should throw ResearchBusyError with job B as existing.
+    let thrownError: unknown;
+    try {
+      resumeResearchJob(jobA.jobId);
+      throw new Error('resumeResearchJob should have thrown');
+    } catch (err) {
+      thrownError = err;
+    }
+
+    expect(thrownError).toBeInstanceOf(ResearchBusyError);
+    if (thrownError instanceof ResearchBusyError) {
+      expect(thrownError.existing.jobId).toBe(jobB.jobId);
+    }
+  });
+
+  it('returns true and resumes when conditions are met', async () => {
+    stubRunning();
+    initResearchJobs(['sess-1']);
+
+    const job = await submitResearchJob({
+      sessionId: 'sess-1', messageId: 'msg-1', question: 'Q1',
+    });
+
+    // Let it stall.
+    await vi.advanceTimersByTimeAsync(21 * 60 * 1000);
+    expect(getSessionJob('sess-1')?.status).toBe('STALLED');
+
+    // Resume should succeed.
+    const result = resumeResearchJob(job.jobId);
+    expect(result).toBe(true);
+    expect(getSessionJob('sess-1')?.status).toBe('RUNNING');
   });
 });
