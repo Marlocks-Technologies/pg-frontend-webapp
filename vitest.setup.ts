@@ -7,12 +7,6 @@ const data: Record<string, string> = {};
 
 // Patch Storage.prototype with implementations that use the shared data object.
 // This ensures vi.spyOn(Storage.prototype.getItem, ...) intercepts all calls.
-const originalKey = Storage.prototype.key;
-const originalGetItem = Storage.prototype.getItem;
-const originalSetItem = Storage.prototype.setItem;
-const originalRemoveItem = Storage.prototype.removeItem;
-const originalClear = Storage.prototype.clear;
-
 Storage.prototype.key = function (index: number): string | null {
   const keys = Object.keys(data);
   return keys[index] ?? null;
@@ -35,6 +29,14 @@ Storage.prototype.clear = function (): void {
     delete data[key];
   }
 };
+
+// Patch the length accessor to read from the shared data object.
+Object.defineProperty(Storage.prototype, 'length', {
+  get() {
+    return Object.keys(data).length;
+  },
+  configurable: true,
+});
 
 vi.stubGlobal('localStorage', Object.create(Storage.prototype));
 

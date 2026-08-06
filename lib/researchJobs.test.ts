@@ -68,3 +68,14 @@ describe('initResearchJobs', () => {
     spy.mockRestore();
   });
 });
+
+describe('test harness storage', () => {
+  it('supports length and key enumeration', () => {
+    localStorage.setItem('a', '1');
+    localStorage.setItem('b', '2');
+    expect(localStorage.length).toBe(2);
+    expect([localStorage.key(0), localStorage.key(1)].sort()).toEqual(['a', 'b']);
+    localStorage.clear();
+    expect(localStorage.length).toBe(0);
+  });
+});
