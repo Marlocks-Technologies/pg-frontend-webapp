@@ -754,3 +754,83 @@ describe('resume return values and errors', () => {
     expect(getSessionJob('sess-1')?.status).toBe('RUNNING');
   });
 });
+
+import { __isLeaderForTests } from '@/lib/researchJobs';
+
+const LOCK_KEY = 'pg-research-lock';
+
+describe('cross-tab leadership', () => {
+  it('takes the lock when none is held', () => {
+    initResearchJobs(['sess-1']);
+    expect(__isLeaderForTests()).toBe(true);
+    expect(localStorage.getItem(LOCK_KEY)).toBeTruthy();
+  });
+
+  it('yields to a fresh lock held by another tab', () => {
+    localStorage.setItem(LOCK_KEY, JSON.stringify({ tabId: 'other-tab', ts: Date.now() }));
+    initResearchJobs(['sess-1']);
+    expect(__isLeaderForTests()).toBe(false);
+  });
+
+  it('steals a lock that has gone stale', () => {
+    localStorage.setItem(
+      LOCK_KEY,
+      JSON.stringify({ tabId: 'dead-tab', ts: Date.now() - 60_000 })
+    );
+    initResearchJobs(['sess-1']);
+    expect(__isLeaderForTests()).toBe(true);
+  });
+
+  it('does not poll while it is not the leader', async () => {
+    localStorage.setItem(LOCK_KEY, JSON.stringify({ tabId: 'other-tab', ts: Date.now() }));
+    const flaky = stubFlakyFetch({ failPolls: 0 });
+
+    initResearchJobs(['sess-1']);
+    __seedForTests([record({ jobId: 'job-7', status: 'RUNNING' })]);
+    // Simulate the other tab writing an update.
+    window.dispatchEvent(new StorageEvent('storage', { key: 'pg-research-jobs' }));
+
+    // Simulate the other tab being genuinely alive: it renews its own lock
+    // every HEARTBEAT_MS (5s), same as ours would. Without this renewal the
+    // lock legitimately goes stale after LOCK_STALE_MS (15s) and our own
+    // heartbeat correctly reclaims it — that is desired behavior for a dead
+    // tab, not the scenario this test is about (a tab that never stops
+    // polling must not also poll).
+    for (let i = 0; i < 6; i++) {
+      await vi.advanceTimersByTimeAsync(5_000);
+      localStorage.setItem(LOCK_KEY, JSON.stringify({ tabId: 'other-tab', ts: Date.now() }));
+    }
+    expect(flaky.pollCount()).toBe(0);
+  });
+
+  // Not from the brief. Added because the brief's "does not poll" test above
+  // only exercises tick()'s own bail-out — it never reaches schedule()'s
+  // `if (!isLeader) return`, since tick() bails before its loop calls
+  // schedule() at all. But submitResearchJob/resumeResearchJob call
+  // schedule() directly, independent of tick(). If a user submits a new
+  // research job from the non-leader tab (both tabs share the UI equally —
+  // nothing restricts submission to the leader), that tab must still not
+  // start polling its own copy of the job, or two tabs poll the same job.
+  it('does not poll a job it just submitted while it is not the leader', async () => {
+    localStorage.setItem(LOCK_KEY, JSON.stringify({ tabId: 'other-tab', ts: Date.now() }));
+    const flaky = stubFlakyFetch({ failPolls: 0 });
+
+    initResearchJobs(['sess-1']);
+    expect(__isLeaderForTests()).toBe(false);
+
+    await submitResearchJob({ sessionId: 'sess-1', messageId: 'msg-1', question: 'Q' });
+
+    // Stay comfortably under LOCK_STALE_MS (15s) so the lock's own staleness
+    // never becomes a confound — this test is purely about schedule()'s guard.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(flaky.pollCount()).toBe(0);
+  });
+
+  it('re-syncs its view when another tab writes', () => {
+    initResearchJobs(['sess-1']);
+    __seedForTests([record({ jobId: 'job-7' })]);
+
+    window.dispatchEvent(new StorageEvent('storage', { key: 'pg-research-jobs' }));
+    expect(getSessionJob('sess-1')?.jobId).toBe('job-7');
+  });
+});

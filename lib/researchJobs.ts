@@ -50,6 +50,9 @@ const POLL_MAX_MS = 12_000;
 const POLL_BACKOFF = 1.35;
 const STALL_AFTER_MS = 20 * 60 * 1000;
 const MAX_CONSECUTIVE_FAILURES = 5;
+const LOCK_KEY = 'pg-research-lock';
+const HEARTBEAT_MS = 5_000;
+const LOCK_STALE_MS = 15_000;
 
 let jobs: Record<string, ResearchJobRecord> = {};
 const listeners = new Set<(event: ResearchEvent) => void>();
@@ -57,6 +60,9 @@ let started = false;
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 const delays = new Map<string, number>();
 const failures = new Map<string, number>();
+let heartbeat: ReturnType<typeof setInterval> | null = null;
+let isLeader = false;
+let tabId = '';
 
 function load(): Record<string, ResearchJobRecord> {
   if (typeof window === 'undefined') return {};
@@ -111,6 +117,14 @@ export function initResearchJobs(knownSessionIds: string[]): void {
     }
   }
   commit();
+
+  tabId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('storage', onStorage);
+    heartbeat = setInterval(tick, HEARTBEAT_MS);
+  }
+  tick();
 }
 
 export function getSessionJob(sessionId: string): ResearchJobRecord | undefined {
@@ -136,7 +150,52 @@ function nextDelay(jobId: string): number {
   return next;
 }
 
+function claimLock(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const raw = localStorage.getItem(LOCK_KEY);
+    const lock = raw ? (JSON.parse(raw) as { tabId: string; ts: number }) : null;
+    const now = Date.now();
+    if (!lock || lock.tabId === tabId || now - lock.ts > LOCK_STALE_MS) {
+      localStorage.setItem(LOCK_KEY, JSON.stringify({ tabId, ts: now }));
+      return true;
+    }
+    return false;
+  } catch {
+    // No storage at all — there is only this tab, so poll.
+    return true;
+  }
+}
+
+function clearAllTimers(): void {
+  timers.forEach(timer => clearTimeout(timer));
+  timers.clear();
+}
+
+/** Refresh leadership and make sure every active job is scheduled. */
+function tick(): void {
+  isLeader = claimLock();
+  if (!isLeader) {
+    clearAllTimers();
+    return;
+  }
+  for (const job of Object.values(jobs)) {
+    if (isActive(job) && !timers.has(job.jobId)) schedule(job.jobId, POLL_MIN_MS);
+  }
+}
+
+function onStorage(event: StorageEvent): void {
+  if (event.key !== JOBS_KEY) return;
+  jobs = load();
+  emit({ kind: 'changed', jobs: Object.values(jobs) });
+}
+
+export function __isLeaderForTests(): boolean {
+  return isLeader;
+}
+
 function schedule(jobId: string, delay: number): void {
+  if (!isLeader) return;
   clearTimer(jobId);
   timers.set(jobId, setTimeout(() => {
     timers.delete(jobId);
@@ -339,6 +398,12 @@ export function __resetForTests(): void {
   jobs = {};
   listeners.clear();
   started = false;
+
+  if (heartbeat) clearInterval(heartbeat);
+  heartbeat = null;
+  if (typeof window !== 'undefined') window.removeEventListener('storage', onStorage);
+  isLeader = false;
+  tabId = '';
 }
 
 export function __seedForTests(records: ResearchJobRecord[]): void {
