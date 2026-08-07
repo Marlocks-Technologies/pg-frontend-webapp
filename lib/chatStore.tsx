@@ -341,6 +341,7 @@ interface ChatContextValue {
   setSidebar: (v: boolean) => void;
   isSessionQuerying: (sessionId: string | null) => boolean;
   runResearch: (sessionId: string, messageId: string, question: string) => Promise<void>;
+  startResearch: (question: string) => Promise<void>;
   answerWithoutResearch: (sessionId: string, messageId: string, question: string) => Promise<void>;
   dismissResearch: (sessionId: string, messageId: string) => void;
   cancelResearch: (sessionId: string, messageId: string, jobId: string) => void;
@@ -686,6 +687,48 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Skips the /chat/query round trip entirely: the user asked for depth
+  // directly, so there is no heuristic to consult and nothing to 409 on.
+  const startResearch = useCallback(async (question: string) => {
+    if (!question.trim()) return;
+
+    let sessionId = state.activeSessionId;
+    if (!sessionId) {
+      const id = makeSessionId();
+      dispatch({
+        type: 'NEW_SESSION',
+        payload: {
+          id, title: titleFromQuestion(question),
+          createdAt: new Date(), lastMessageAt: new Date(),
+          messages: [], messageCount: 0, historyLoaded: false,
+        },
+      });
+      sessionId = id;
+    }
+
+    dispatch({
+      type: 'ADD_MESSAGE',
+      payload: {
+        sessionId,
+        message: { id: uid(), role: 'user', content: question, timestamp: new Date() },
+      },
+    });
+
+    const placeholderId = uid();
+    dispatch({
+      type: 'ADD_MESSAGE',
+      payload: {
+        sessionId,
+        message: {
+          id: placeholderId, role: 'assistant', content: '',
+          timestamp: new Date(), isStreaming: true,
+        },
+      },
+    });
+
+    await runResearch(sessionId, placeholderId, question);
+  }, [state.activeSessionId, runResearch]);
+
   const answerWithoutResearch = useCallback(
     async (sessionId: string, messageId: string, question: string) => {
       dispatch({
@@ -777,7 +820,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <Ctx.Provider value={{ state, activeSession, sendMessage, createSession, switchSession, deleteSession, toggleDark, toggleSidebar, setSidebar, isSessionQuerying, runResearch, answerWithoutResearch, dismissResearch, cancelResearch }}>
+    <Ctx.Provider value={{ state, activeSession, sendMessage, createSession, switchSession, deleteSession, toggleDark, toggleSidebar, setSidebar, isSessionQuerying, runResearch, startResearch, answerWithoutResearch, dismissResearch, cancelResearch }}>
       {children}
     </Ctx.Provider>
   );
