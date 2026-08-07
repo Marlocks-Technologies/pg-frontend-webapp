@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Message, useChatStore } from '@/lib/chatStore';
+import { Message, useChatStore, type DocumentRenderMode } from '@/lib/chatStore';
 import {
   Citation,
   DocumentSummary,
@@ -116,6 +116,7 @@ function DownloadAnswerControl({
   const [refDocId, setRefDocId] = useState<string | null>(pending?.referenceDocumentId ?? null);
   const [refDocs, setRefDocs] = useState<DocumentSummary[] | null>(null);
   const [refDocsFailed, setRefDocsFailed] = useState(false);
+  const [mode, setMode] = useState<DocumentRenderMode>('faithful');
 
   const busy = !!message.isGeneratingArtifact;
 
@@ -131,6 +132,7 @@ function DownloadAnswerControl({
   const handleDownload = () => {
     if (busy) return;
     downloadAnswerAsDocument(sessionId, message.id, {
+      mode,
       ...(format ? { format } : {}),
       ...(refDocId ? { referenceDocumentId: refDocId } : {}),
     });
@@ -160,6 +162,41 @@ function DownloadAnswerControl({
 
       <div className="pg-expand" data-open={open}>
         <div>
+          {/* How faithfully to render. Kept above the format/style row because
+              it changes what the document IS, not just how it looks. */}
+          <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+            <div className={`flex items-center rounded-full border p-0.5
+              ${isDark ? 'border-white/10' : 'border-charcoal/12'}`}
+            >
+              {([
+                { value: 'faithful', label: 'As written' },
+                { value: 'adapted',  label: 'House style' },
+              ] as const).map(m => (
+                <button
+                  key={m.value}
+                  onClick={() => setMode(m.value)}
+                  disabled={busy}
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors duration-150
+                    disabled:cursor-not-allowed
+                    ${mode === m.value
+                      ? isDark ? 'bg-white/12 text-white/90' : 'bg-charcoal/10 text-charcoal/90'
+                      : isDark ? 'text-white/40 hover:text-white/70' : 'text-charcoal/40 hover:text-charcoal/70'
+                    }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+
+            <p className={`text-[10.5px] leading-snug flex-1 min-w-[190px]
+              ${isDark ? 'text-white/35' : 'text-charcoal/40'}`}
+            >
+              {mode === 'faithful'
+                ? 'The answer above, word for word, in the template’s formatting.'
+                : 'Reorganised into the template’s structure and headings. Wording may change; the substance should not.'}
+            </p>
+          </div>
+
           <div className="mt-2.5 flex items-center gap-2 flex-wrap">
             {/* Format picker */}
             <div className={`flex items-center rounded-full border p-0.5

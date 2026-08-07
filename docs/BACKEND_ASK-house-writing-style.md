@@ -118,3 +118,57 @@ Until then the client keeps sending `content` + `referenceDocumentId` to
    template built from manually formatted paragraphs rather than real Word heading
    styles may yield almost nothing — worth checking against the actual
    "Legal Opinion 1.docx" and "Post Hearing Brief - Arbitration.docx" before committing.
+
+---
+
+## Evidence: Option A does not currently work at all
+
+We built the user-facing choice ("As written" / "House style") and tested the
+House-style path against production. It is not merely lower-fidelity — it loses the
+content entirely.
+
+Request: `POST /documents/generate` with `prompt` = a rewrite-into-house-style
+instruction wrapping a short finished opinion, plus
+`referenceDocumentId=4b981103-…` (Legal Opinion 1.docx) and `topK: 1`.
+
+Response: `201`, but **`generationMode: extractive_fallback`**, `chunksRetrieved: 1`.
+
+Downloaded and unzipped the `.docx`. Of the supplied opinion:
+
+| Content | In document |
+|---|---|
+| `Igiogbe` | **missing** |
+| `Ogiamien v Ogiamien` | **missing** |
+| `Idehen v Idehen` | **missing** |
+| `eldest surviving son` | **missing** |
+| `no valid will` | **missing** |
+
+Nothing from the answer survived. The planner failed to return a usable plan, and
+`_fallback_plan` builds from retrieved sources instead — so the document was assembled
+from one unrelated chunk while the actual opinion was discarded. Reproduced twice, at
+22.0s and 15.4s, with and without an explicit `title`.
+
+Two consequences:
+
+1. **`extractive_fallback` silently discards caller-supplied content.** Whatever else
+   changes, that fallback should not be reachable for a request whose prompt carries the
+   substance — better to fail loudly than to return a confident 201 with a document that
+   answers a different question. We now detect `generationMode: extractive_fallback`
+   client-side and refuse to attach the artifact, but that is a guard against a backend
+   behaviour that should not exist.
+
+2. **It strengthens the case for Option B.** Retrofitting house style onto finished text
+   is exactly where this breaks. Shaping the answer at writing time never puts the
+   planner in the position of having to reorganise prose it did not plan.
+
+Also fixed client-side, worth knowing: without an explicit `title`,
+`_title_from_prompt` derives the filename from the prompt's opening words, so every
+adapted download was named
+`Rewrite-The-Following-Finished-Text-As-A-Formal-Document-That-Follows-This.docx`.
+We now always send a `title` derived from the answer's first heading.
+
+### Added question
+
+4. Why does the planner fall back here — the 2,400-token planning cap, the unusual
+   instruction-wrapper prompt shape, or something else? If a modest cap raise or a
+   prompt tweak makes Option A viable, that changes the recommendation.

@@ -362,7 +362,7 @@ interface ChatContextValue {
   downloadAnswerAsDocument: (
     sessionId: string,
     messageId: string,
-    opts: { format?: string; referenceDocumentId?: string }
+    opts: { format?: string; referenceDocumentId?: string; mode?: DocumentRenderMode }
   ) => Promise<void>;
 }
 
@@ -397,14 +397,42 @@ well-structured document.
 ---
 `;
 
+// Adapted mode deliberately goes the other way: it asks the planner to rewrite
+// the answer into the reference document's conventions. _planning_prompt already
+// carries that document's extracted structure_outline, so the model is writing
+// to a real house skeleton rather than inventing one. The trade is that a model
+// touches finished text — fine for a draft the user wants in firm form, not for
+// an opinion they need unchanged, which is why the user picks.
+const ADAPT_TO_HOUSE_STYLE_PREFIX = `Rewrite the following finished text as a formal document that follows this
+organisation's house conventions: its section order, its heading names, and the
+way it presents authorities, assumptions and conclusions.
+
+You may reorganise sections, retitle them, and adjust phrasing so the document
+reads consistently with those conventions. You must not change the substance:
+do not add or remove any authority, citation, fact, figure or caveat, and do not
+alter, strengthen or soften any conclusion.
+
+---
+`;
+
 /** Content mode's ceiling. Enforced server-side; checked here to fail fast. */
 const DOCUMENT_CONTENT_CHAR_CAP = 500_000;
 
-/** Prompt mode's ceiling on older deployments. */
+/** Prompt mode's ceiling — applies to adapted mode and the legacy fallback. */
 const DOCUMENT_PROMPT_CHAR_CAP = 12_000;
+
+/**
+ * `faithful` renders the answer exactly as written, styled by the template.
+ * `adapted` lets the planner restructure it into the template's house style.
+ */
+export type DocumentRenderMode = 'faithful' | 'adapted';
 
 function buildFaithfulRenderPrompt(content: string): string {
   return `${FAITHFUL_RENDER_PREFIX}${content}`;
+}
+
+function buildAdaptedPrompt(content: string): string {
+  return `${ADAPT_TO_HOUSE_STYLE_PREFIX}${content}`;
 }
 
 /**
@@ -955,12 +983,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     async (
       sessionId: string,
       messageId: string,
-      opts: { format?: string; referenceDocumentId?: string }
+      opts: { format?: string; referenceDocumentId?: string; mode?: DocumentRenderMode }
     ) => {
       const message = state.sessions
         .find(s => s.id === sessionId)
         ?.messages.find(m => m.id === messageId);
       if (!message || !message.content) return;
+
+      const adapted = opts.mode === 'adapted';
 
       const tooLong = (cap: number, used: number): string =>
         `This answer is too long to render into a document — it is ` +
@@ -969,7 +999,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         `the answer isn't something we're willing to do silently, so this download can't ` +
         `proceed as-is.`;
 
-      if (message.content.length > DOCUMENT_CONTENT_CHAR_CAP) {
+      // Adapted mode goes through the planner, so it inherits prompt mode's far
+      // tighter ceiling rather than content mode's.
+      const cap = adapted ? DOCUMENT_PROMPT_CHAR_CAP : DOCUMENT_CONTENT_CHAR_CAP;
+      const used = adapted
+        ? ADAPT_TO_HOUSE_STYLE_PREFIX.length + message.content.length
+        : message.content.length;
+
+      if (used > cap) {
         dispatch({
           type: 'PATCH_MESSAGE',
           payload: {
@@ -977,7 +1014,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             messageId,
             patch: {
               isGeneratingArtifact: false,
-              artifactError: tooLong(DOCUMENT_CONTENT_CHAR_CAP, message.content.length),
+              artifactError: adapted
+                ? tooLong(cap, used) +
+                  ` Downloading it as written, rather than adapted to the house style, ` +
+                  `raises the limit to ${DOCUMENT_CONTENT_CHAR_CAP.toLocaleString()} characters.`
+                : tooLong(cap, used),
             },
           },
         });
@@ -999,13 +1040,38 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         ...(opts.referenceDocumentId ? { referenceDocumentId: opts.referenceDocumentId } : {}),
       };
 
+      // The planner can fail and fall back to building a document from
+      // retrieved chunks, which discards the answer entirely — verified in
+      // production, producing a document with none of the opinion's
+      // authorities in it. Never hand that to the user as their answer.
+      const CONTENT_LOSING_MODES = ['extractive_fallback'];
+
+      // Derive a title so the filename comes from the answer rather than from
+      // the instruction wrapper — without this, adapted downloads are named
+      // "Rewrite-The-Following-Finished-Text-As-A-Formal-Document...".
+      const headingMatch = message.content.match(/^#{1,3}\s+(.+)$/m);
+      const derivedTitle = (headingMatch?.[1] ?? message.content)
+        .replace(/[*_`#]/g, '')
+        .trim()
+        .slice(0, 120);
+
       try {
         let resp;
         try {
-          // Content mode: the document is the answer, laid out as-is.
-          resp = await generateDocument({ ...shared, content: message.content });
+          resp = adapted
+            // Planner rewrites into the reference document's house structure.
+            ? await generateDocument({
+                ...shared,
+                title: derivedTitle,
+                prompt: buildAdaptedPrompt(message.content),
+                topK: 1,
+              })
+            // Content mode: the document is the answer, laid out as-is.
+            : await generateDocument({ ...shared, title: derivedTitle, content: message.content });
         } catch (error: unknown) {
-          if (!isPreContentModeRejection(error)) throw error;
+          // Adapted mode already uses `prompt`, so this rejection can only
+          // reach the faithful path on a pre-content-mode deployment.
+          if (adapted || !isPreContentModeRejection(error)) throw error;
 
           // Older deployment — only `prompt` is accepted, and its cap is far
           // tighter, so an answer that fits content mode may not fit this.
@@ -1026,10 +1092,32 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           }
           resp = await generateDocument({
             ...shared,
+            title: derivedTitle,
             prompt: buildFaithfulRenderPrompt(message.content),
             topK: 1,
           });
         }
+
+        const producedMode = resp.metadata?.generationMode;
+        if (producedMode && CONTENT_LOSING_MODES.includes(producedMode)) {
+          dispatch({
+            type: 'PATCH_MESSAGE',
+            payload: {
+              sessionId,
+              messageId,
+              patch: {
+                isGeneratingArtifact: false,
+                artifactError:
+                  `The document service couldn't restructure this answer and fell back to ` +
+                  `building one from its own sources, which would have left your answer out ` +
+                  `of it entirely — so it wasn't attached. Download it "As written" instead, ` +
+                  `which reproduces the answer exactly.`,
+              },
+            },
+          });
+          return;
+        }
+
         dispatch({
           type: 'PATCH_MESSAGE',
           payload: {
