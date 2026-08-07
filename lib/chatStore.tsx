@@ -42,6 +42,8 @@ export interface Message {
   artifact?: GeneratedArtifact;
   /** Set if the post-answer document generation call failed; the answer text stands regardless. */
   artifactError?: string;
+  /** True while downloadAnswerAsDocument's generateDocument call is in flight. */
+  isGeneratingArtifact?: boolean;
   isStreaming?: boolean;
   isError?: boolean;
   chunksRetrieved?: number;
@@ -89,6 +91,7 @@ function serialiseSession(s: Session): unknown {
       // Never persist in-flight state
       isStreaming: false,
       researchStatus: undefined,
+      isGeneratingArtifact: false,
     })),
   };
 }
@@ -356,6 +359,11 @@ interface ChatContextValue {
   answerWithoutResearch: (sessionId: string, messageId: string, question: string) => Promise<void>;
   dismissResearch: (sessionId: string, messageId: string) => void;
   cancelResearch: (sessionId: string, messageId: string, jobId: string) => void;
+  downloadAnswerAsDocument: (
+    sessionId: string,
+    messageId: string,
+    opts: { format?: string; referenceDocumentId?: string }
+  ) => Promise<void>;
 }
 
 const Ctx = createContext<ChatContextValue | null>(null);
@@ -365,6 +373,35 @@ const CHAR_DELAY = 6; // ms per tick — lower = faster
 // 3-char step that would take most of a minute to reveal, so the step scales
 // with length to keep any answer inside this budget.
 const MAX_TYPEWRITE_MS = 6_000;
+
+// ─── Faithful-render document prompt ──────────────────────────────────────────
+//
+// /documents/generate always plans a document from `prompt` through its own
+// RAG pipeline — there is no "just render this" mode (see
+// docs/BACKEND_ASK-styled-document-from-content.md). Wrapping the finished
+// answer in an explicit reproduction instruction, rather than sending the
+// original question, gives the planner the real content to lay out instead of
+// re-deriving it — the planning system prompt already forbids inventing facts,
+// so an instruction to reproduce verbatim is the mechanism, not a workaround.
+const FAITHFUL_RENDER_PREFIX = `Reproduce the following text faithfully as a formal document. It is a finished
+piece of work: do not summarise it, do not omit any part of it, do not add new
+facts, citations, authorities or commentary, and do not soften or restate its
+conclusions. Preserve every heading, citation, case name, statutory reference
+and quotation exactly as written. Your only job is to lay this content out as a
+well-structured document.
+
+---
+`;
+
+// GenerationRequest.from_payload raises ValueError above this — enforced
+// server-side and non-negotiable. We check it client-side so an over-long
+// opinion gets a clear refusal instead of a wasted round trip (or, worse, a
+// silently truncated document).
+const DOCUMENT_PROMPT_CHAR_CAP = 12_000;
+
+function buildFaithfulRenderPrompt(content: string): string {
+  return `${FAITHFUL_RENDER_PREFIX}${content}`;
+}
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, {
@@ -894,6 +931,85 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // ── Render an existing answer into a styled document ──────────────────────
+  // Works for any completed answer — ordinary chat or a verified research
+  // opinion. The answer's own `content` is the source of truth; we never
+  // re-derive it from the original question.
+  const downloadAnswerAsDocument = useCallback(
+    async (
+      sessionId: string,
+      messageId: string,
+      opts: { format?: string; referenceDocumentId?: string }
+    ) => {
+      const message = state.sessions
+        .find(s => s.id === sessionId)
+        ?.messages.find(m => m.id === messageId);
+      if (!message || !message.content) return;
+
+      const totalLength = FAITHFUL_RENDER_PREFIX.length + message.content.length;
+      if (totalLength > DOCUMENT_PROMPT_CHAR_CAP) {
+        const overBy = totalLength - DOCUMENT_PROMPT_CHAR_CAP;
+        dispatch({
+          type: 'PATCH_MESSAGE',
+          payload: {
+            sessionId,
+            messageId,
+            patch: {
+              isGeneratingArtifact: false,
+              artifactError:
+                `This answer is too long to render into a document — it is ` +
+                `${overBy.toLocaleString()} character${overBy === 1 ? '' : 's'} over the ` +
+                `${DOCUMENT_PROMPT_CHAR_CAP.toLocaleString()}-character limit the document service ` +
+                `accepts. Shortening the answer isn't something we're willing to do silently, so ` +
+                `this download can't proceed as-is.`,
+            },
+          },
+        });
+        return;
+      }
+
+      dispatch({
+        type: 'PATCH_MESSAGE',
+        payload: {
+          sessionId,
+          messageId,
+          patch: { isGeneratingArtifact: true, artifactError: undefined },
+        },
+      });
+
+      try {
+        const resp = await generateDocument({
+          prompt: buildFaithfulRenderPrompt(message.content),
+          sessionId,
+          topK: 1,
+          ...(opts.format ? { format: opts.format } : {}),
+          ...(opts.referenceDocumentId ? { referenceDocumentId: opts.referenceDocumentId } : {}),
+        });
+        dispatch({
+          type: 'PATCH_MESSAGE',
+          payload: {
+            sessionId,
+            messageId,
+            patch: { artifact: resp.artifact, isGeneratingArtifact: false, artifactError: undefined },
+          },
+        });
+      } catch (error: unknown) {
+        dispatch({
+          type: 'PATCH_MESSAGE',
+          payload: {
+            sessionId,
+            messageId,
+            patch: {
+              isGeneratingArtifact: false,
+              artifactError: error instanceof Error ? error.message : 'Document generation failed.',
+            },
+          },
+        });
+      }
+    },
+    [state.sessions]
+  );
+
   const toggleDark    = useCallback(() => dispatch({ type: 'TOGGLE_DARK' }), []);
   const toggleSidebar = useCallback(() => dispatch({ type: 'TOGGLE_SIDEBAR' }), []);
   const setSidebar    = useCallback((v: boolean) => dispatch({ type: 'SET_SIDEBAR', payload: v }), []);
@@ -904,7 +1020,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <Ctx.Provider value={{ state, activeSession, sendMessage, createSession, switchSession, deleteSession, toggleDark, toggleSidebar, setSidebar, isSessionQuerying, runResearch, startResearch, answerWithoutResearch, dismissResearch, cancelResearch }}>
+    <Ctx.Provider value={{ state, activeSession, sendMessage, createSession, switchSession, deleteSession, toggleDark, toggleSidebar, setSidebar, isSessionQuerying, runResearch, startResearch, answerWithoutResearch, dismissResearch, cancelResearch, downloadAnswerAsDocument }}>
       {children}
     </Ctx.Provider>
   );

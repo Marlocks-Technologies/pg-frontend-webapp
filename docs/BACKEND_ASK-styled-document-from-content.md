@@ -176,14 +176,51 @@ handling unchanged:
 
 ## What the frontend does in the meantime
 
-- Routes Generate mode away from the synchronous path when research is needed, so the
-  timeout above stops happening even before the backend change lands.
-- Carries the chosen format and reference document through the research job.
-- Shows the download control on completed answers, disabled with an honest explanation
-  until the render endpoint exists. We are deliberately not shipping a button that
-  produces a document differing from the answer above it.
+Rather than wait for (2), we ship a working download today by leaning on the fact
+that `_planning_prompt` embeds `request.prompt` verbatim and the planning system
+prompt already forbids inventing facts. Any completed answer — ordinary chat or a
+verified research opinion — gets a "Download as document" control. Choosing a
+format (and, optionally, a style reference) sends the answer's own `content`,
+wrapped in an explicit faithful-reproduction instruction, as `prompt` to
+`POST /documents/generate` with `topK: 1` (retrieval still runs server-side; we
+cannot disable it, but we keep it small so it has as little room as possible to
+compete with the supplied text):
 
-Once (2) ships, enabling it is a small client change.
+```
+Reproduce the following text faithfully as a formal document. It is a finished
+piece of work: do not summarise it, do not omit any part of it, do not add new
+facts, citations, authorities or commentary, and do not soften or restate its
+conclusions. Preserve every heading, citation, case name, statutory reference
+and quotation exactly as written. Your only job is to lay this content out as a
+well-structured document.
+
+---
+<the answer text>
+```
+
+The returned artifact attaches to the same message the same way a document
+generated inline during Generate mode already does.
+
+This is a workaround, not a substitute for (2):
+
+- It is bounded by the same 12,000-character `prompt` cap as everything else that
+  hits this endpoint. The client checks the wrapped prompt's length **before**
+  calling and refuses outright — with a clear explanation of how far over the
+  limit the answer is — rather than truncate a legal opinion and hand over a
+  document that silently drops part of it.
+- Retrieval still runs on every call even though nothing needs retrieving; `topK: 1`
+  only shrinks the waste, it doesn't remove it.
+- Fidelity rests entirely on the model honouring the reproduction instruction. It
+  has no structural guarantee the way a real "render this" mode would.
+
+For a research answer whose format/style was chosen in Generate mode before the
+question routed to research (`pendingGenerate`), the control opens pre-selected
+with that choice so the user doesn't have to repeat it.
+
+Once (2) ships, the client change is small: swap the wrapped-prompt call for
+whatever `content`-accepting shape lands, drop the character-cap guard (or raise
+it to whatever ceiling the new path has), and the same control and artifact
+rendering keep working unchanged.
 
 ## Questions back to you
 
