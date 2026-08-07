@@ -315,7 +315,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeTypeRef = useRef<{
-    sessionId: string; messageId: string; fullText: string;
+    sessionId: string; messageId: string; fullText: string; onComplete?: () => void;
   } | null>(null);
 
   // ── Hydrate from localStorage on mount ────────────────────────────────────
@@ -399,24 +399,40 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // ── Typewriter effect ──────────────────────────────────────────────────────
   const typewrite = useCallback(
     (sessionId: string, messageId: string, fullText: string, onComplete?: () => void) => {
-      // Never strand a half-typed message: an interrupted one jumps to its end.
+      const previous = activeTypeRef.current;
+
+      // A duplicate call for the message already in flight (e.g. a completion
+      // event firing twice) is a no-op: leave its running interval alone
+      // rather than blanking it back to an empty string and retyping.
+      if (previous && previous.messageId === messageId) {
+        return;
+      }
+
+      // Never strand a half-typed message: an interrupted one jumps straight
+      // to its end by running its own onComplete, so it keeps whatever
+      // citations, artifact, or web sources that completion would have
+      // attached — the same payload it would have gotten by finishing
+      // naturally. Fall back to a content-only snap if there is none.
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
-        const previous = activeTypeRef.current;
         if (previous && previous.messageId !== messageId) {
-          dispatch({
-            type: 'PATCH_MESSAGE',
-            payload: {
-              sessionId: previous.sessionId,
-              messageId: previous.messageId,
-              patch: { content: previous.fullText, isStreaming: false },
-            },
-          });
+          if (previous.onComplete) {
+            previous.onComplete();
+          } else {
+            dispatch({
+              type: 'PATCH_MESSAGE',
+              payload: {
+                sessionId: previous.sessionId,
+                messageId: previous.messageId,
+                patch: { content: previous.fullText, isStreaming: false },
+              },
+            });
+          }
         }
       }
 
-      activeTypeRef.current = { sessionId, messageId, fullText };
+      activeTypeRef.current = { sessionId, messageId, fullText, onComplete };
 
       let i = 0;
       const step = Math.max(3, Math.ceil(fullText.length / (MAX_TYPEWRITE_MS / CHAR_DELAY)));
