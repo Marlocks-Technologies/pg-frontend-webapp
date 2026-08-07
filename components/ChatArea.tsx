@@ -63,8 +63,17 @@ const STARTER_CARDS = [
 // ─── Chat Area ────────────────────────────────────────────────────────────────
 
 export default function ChatArea() {
-  const { state, activeSession, sendMessage, createSession, toggleSidebar, isSessionQuerying } =
-    useChatStore();
+  const {
+    state,
+    activeSession,
+    sendMessage,
+    createSession,
+    toggleSidebar,
+    isSessionQuerying,
+    runResearch,
+    answerWithoutResearch,
+    dismissResearch,
+  } = useChatStore();
   const { isDark, isSidebarOpen } = state;
   const isQuerying = isSessionQuerying(state.activeSessionId);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -156,7 +165,18 @@ export default function ChatArea() {
         {hasMessages ? (
           <div className="px-4 py-6 space-y-6 max-w-3xl mx-auto">
             {activeSession!.messages.map(msg => (
-              <MessageBubble key={msg.id} message={msg} isDark={isDark} />
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                isDark={isDark}
+                onRunResearch={() =>
+                  msg.researchPrompt &&
+                  runResearch(activeSession!.id, msg.id, msg.researchPrompt.question)}
+                onAnswerNow={() =>
+                  msg.researchPrompt &&
+                  answerWithoutResearch(activeSession!.id, msg.id, msg.researchPrompt.question)}
+                onDismissResearch={() => dismissResearch(activeSession!.id, msg.id)}
+              />
             ))}
             <div ref={bottomRef} />
           </div>

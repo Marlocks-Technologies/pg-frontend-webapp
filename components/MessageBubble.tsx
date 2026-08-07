@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Message } from '@/lib/chatStore';
 import { Citation, GeneratedArtifact, WebSource, artifactDownloadUrl } from '@/lib/api';
 import MarkdownMessage from './MarkdownMessage';
+import { ResearchConsent } from './ResearchCard';
 
 // ─── Generated artifact card ──────────────────────────────────────────────────
 
@@ -237,9 +238,15 @@ function ThinkingDots({ isDark, label }: { isDark: boolean; label?: string }) {
 export default function MessageBubble({
   message,
   isDark,
+  onRunResearch,
+  onAnswerNow,
+  onDismissResearch,
 }: {
   message: Message;
   isDark: boolean;
+  onRunResearch?: () => void;
+  onAnswerNow?: () => void;
+  onDismissResearch?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
@@ -293,7 +300,16 @@ export default function MessageBubble({
           `}
         >
           {/* Content */}
-          {!message.content && message.isStreaming ? (
+          {message.researchPrompt ? (
+            <ResearchConsent
+              question={message.researchPrompt.question}
+              canAnswerNow={message.researchPrompt.canAnswerNow}
+              isDark={isDark}
+              onRun={() => onRunResearch?.()}
+              onAnswerNow={() => onAnswerNow?.()}
+              onDismiss={() => onDismissResearch?.()}
+            />
+          ) : !message.content && message.isStreaming ? (
             <ThinkingDots isDark={isDark} label={message.researchStatus} />
           ) : isUser ? (
             // User messages: plain text, preserve newlines

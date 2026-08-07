@@ -50,6 +50,8 @@ export interface Message {
   isResearch?: boolean;
   /** Links this message to its record in the research registry. */
   researchJobId?: string;
+  /** Present while the user is being asked whether to run deep research. */
+  researchPrompt?: { question: string; canAnswerNow: boolean };
 }
 
 export interface Session {
@@ -292,6 +294,9 @@ interface ChatContextValue {
   toggleSidebar: () => void;
   setSidebar: (v: boolean) => void;
   isSessionQuerying: (sessionId: string | null) => boolean;
+  runResearch: (sessionId: string, messageId: string, question: string) => Promise<void>;
+  answerWithoutResearch: (sessionId: string, messageId: string, question: string) => Promise<void>;
+  dismissResearch: (sessionId: string, messageId: string) => void;
 }
 
 const Ctx = createContext<ChatContextValue | null>(null);
@@ -575,34 +580,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         // Authority-heavy question — hand off to the persistent registry so
         // the job survives even if this tab reloads.
         if (err instanceof ApiError && err.researchRequired) {
-          try {
-            const job = await submitResearchJob({
-              sessionId, messageId: placeholderId, question,
-            });
-            dispatch({ type: 'SET_QUERYING', payload: { sessionId, value: false } });
-            dispatch({
-              type: 'PATCH_MESSAGE',
-              payload: {
-                sessionId, messageId: placeholderId,
-                patch: { researchJobId: job.jobId, isResearch: true },
+          dispatch({ type: 'SET_QUERYING', payload: { sessionId, value: false } });
+          dispatch({
+            type: 'PATCH_MESSAGE',
+            payload: {
+              sessionId, messageId: placeholderId,
+              patch: {
+                isStreaming: false,
+                researchPrompt: { question, canAnswerNow: question.length <= 1000 },
               },
-            });
-          } catch (submitError: unknown) {
-            dispatch({ type: 'SET_QUERYING', payload: { sessionId, value: false } });
-            dispatch({
-              type: 'PATCH_MESSAGE',
-              payload: {
-                sessionId, messageId: placeholderId,
-                patch: {
-                  content: submitError instanceof Error
-                    ? submitError.message
-                    : 'Deep research could not be started.',
-                  isStreaming: false,
-                  isError: true,
-                },
-              },
-            });
-          }
+            },
+          });
           return;
         }
 
@@ -624,6 +612,85 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     [state.activeSessionId, state.sessions, typewrite]
   );
 
+  // ── Deep research consent actions ──────────────────────────────────────────
+  const runResearch = useCallback(async (sessionId: string, messageId: string, question: string) => {
+    dispatch({
+      type: 'PATCH_MESSAGE',
+      payload: { sessionId, messageId, patch: { researchPrompt: undefined, isStreaming: true } },
+    });
+    try {
+      const job = await submitResearchJob({ sessionId, messageId, question });
+      dispatch({
+        type: 'PATCH_MESSAGE',
+        payload: { sessionId, messageId, patch: { researchJobId: job.jobId, isResearch: true } },
+      });
+    } catch (error: unknown) {
+      dispatch({
+        type: 'PATCH_MESSAGE',
+        payload: {
+          sessionId, messageId,
+          patch: {
+            content: error instanceof Error ? error.message : 'Deep research could not be started.',
+            isStreaming: false,
+            isError: true,
+          },
+        },
+      });
+    }
+  }, []);
+
+  const answerWithoutResearch = useCallback(
+    async (sessionId: string, messageId: string, question: string) => {
+      dispatch({
+        type: 'PATCH_MESSAGE',
+        payload: { sessionId, messageId, patch: { researchPrompt: undefined, isStreaming: true } },
+      });
+      dispatch({ type: 'SET_QUERYING', payload: { sessionId, value: true } });
+      try {
+        const resp = await chatQuery({ question, sessionId, autoResearch: false });
+        dispatch({ type: 'SET_QUERYING', payload: { sessionId, value: false } });
+        typewrite(sessionId, messageId, resp.answer, () => {
+          dispatch({
+            type: 'PATCH_MESSAGE',
+            payload: {
+              sessionId, messageId,
+              patch: {
+                content: resp.answer,
+                citations: resp.citations,
+                chunksRetrieved: resp.metadata?.chunks_retrieved ?? resp.metadata?.chunksRetrieved,
+                isStreaming: false,
+              },
+            },
+          });
+        });
+      } catch (error: unknown) {
+        dispatch({ type: 'SET_QUERYING', payload: { sessionId, value: false } });
+        dispatch({
+          type: 'PATCH_MESSAGE',
+          payload: {
+            sessionId, messageId,
+            patch: {
+              content: error instanceof Error ? error.message : 'Something went wrong.',
+              isStreaming: false,
+              isError: true,
+            },
+          },
+        });
+      }
+    },
+    [typewrite]
+  );
+
+  const dismissResearch = useCallback((sessionId: string, messageId: string) => {
+    dispatch({
+      type: 'PATCH_MESSAGE',
+      payload: {
+        sessionId, messageId,
+        patch: { researchPrompt: undefined, isStreaming: false, content: '_Deep research not run._' },
+      },
+    });
+  }, []);
+
   const toggleDark    = useCallback(() => dispatch({ type: 'TOGGLE_DARK' }), []);
   const toggleSidebar = useCallback(() => dispatch({ type: 'TOGGLE_SIDEBAR' }), []);
   const setSidebar    = useCallback((v: boolean) => dispatch({ type: 'SET_SIDEBAR', payload: v }), []);
@@ -634,7 +701,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <Ctx.Provider value={{ state, activeSession, sendMessage, createSession, switchSession, deleteSession, toggleDark, toggleSidebar, setSidebar, isSessionQuerying }}>
+    <Ctx.Provider value={{ state, activeSession, sendMessage, createSession, switchSession, deleteSession, toggleDark, toggleSidebar, setSidebar, isSessionQuerying, runResearch, answerWithoutResearch, dismissResearch }}>
       {children}
     </Ctx.Provider>
   );
