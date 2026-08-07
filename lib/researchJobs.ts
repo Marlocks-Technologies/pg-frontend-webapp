@@ -44,6 +44,7 @@ export class ResearchBusyError extends Error {
 }
 
 const JOBS_KEY = 'pg-research-jobs';
+const ANNOUNCED_KEY = 'pg-research-announced';
 const EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
 const POLL_MIN_MS = 3_000;
 const POLL_MAX_MS = 12_000;
@@ -386,6 +387,57 @@ export function dropSessionJobs(sessionId: string): void {
     changed = true;
   }
   if (changed) commit();
+}
+
+// ─── Cross-tab announcement claim ──────────────────────────────────────────────
+//
+// The heartbeat lock above (claimLock/isLeader) decides which tab *polls* —
+// it says nothing about which tab may *show a toast*. The leader can be a
+// background tab the user isn't even looking at, so gating the toast on
+// leadership would mean the visible tab sometimes never announces at all.
+// Instead, every tab that notices a job go COMPLETED races to claim it here;
+// whichever tab's write lands first wins and shows the toast, the rest don't.
+
+function loadAnnounced(): Record<string, number> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(ANNOUNCED_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, number>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveAnnounced(map: Record<string, number>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(ANNOUNCED_KEY, JSON.stringify(map));
+  } catch {
+    // Quota or private browsing — degrade to "every tab announces", which is
+    // a duplicate toast, not a lost one.
+  }
+}
+
+/**
+ * First-come claim on a completed job's announcement. Returns true if this
+ * call won the claim (the caller should show the toast); false if another
+ * tab already claimed it.
+ *
+ * Entries are pruned to the same 7-day window as job expiry (`EXPIRY_MS`) —
+ * an announcement flag has no reason to outlive the job it refers to, and
+ * this keeps the map from growing without bound across a long-lived profile.
+ */
+export function claimAnnouncement(jobId: string): boolean {
+  const map = loadAnnounced();
+  if (map[jobId]) return false;
+
+  const now = Date.now();
+  map[jobId] = now;
+  for (const [id, ts] of Object.entries(map)) {
+    if (now - ts > EXPIRY_MS) delete map[id];
+  }
+  saveAnnounced(map);
+  return true;
 }
 
 // ─── Test seams ───────────────────────────────────────────────────────────────

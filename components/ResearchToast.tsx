@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/lib/chatStore';
-import { markResearchSeen } from '@/lib/researchJobs';
+import { claimAnnouncement, markResearchSeen } from '@/lib/researchJobs';
 
 const DISMISS_MS = 12_000;
 
@@ -33,7 +33,17 @@ export default function ResearchToast() {
     );
     if (!ready) return;
 
+    // Mark it locally first so a re-run of this effect (e.g. an unrelated
+    // state change) doesn't re-evaluate the same job before the cross-tab
+    // claim below has had a chance to stick.
     announced.current.add(ready.jobId);
+
+    // The heartbeat lock in lib/researchJobs.ts decides which tab polls, not
+    // which tab announces — the polling leader can be a background tab the
+    // user isn't watching. Claim the announcement here so exactly one open
+    // tab shows the toast regardless of which one is leading.
+    if (!claimAnnouncement(ready.jobId)) return;
+
     setToast({
       jobId: ready.jobId,
       sessionId: ready.sessionId,

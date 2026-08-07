@@ -92,16 +92,24 @@ Jobs are owned by `lib/researchJobs.ts`, which persists them to localStorage and
 resumes polling after a reload, so closing the tab does not lose an opinion the
 backend has already paid to produce. One job runs per session; several can run
 across sessions. Only one browser tab polls, elected by a heartbeat lock, so
-several open tabs never race the backend or double-announce a result.
+several open tabs never race the backend with duplicate requests. That lock
+only decides who polls, not who announces — the polling tab can be a
+background one the user isn't watching — so a separate first-come claim in
+localStorage makes sure exactly one open tab shows the completion toast, even
+though every tab sees the same underlying job record and sidebar dot.
 
 While a job is queued or running, the chat header names it — "Researching…" with
 an amber "Researching" pill — instead of the generic "Searching knowledge
-base…" used for an ordinary synchronous answer. The sidebar row for that session
-shows a "· Researching" dot; once the job completes it flips to "· Ready" until
-the result is opened. If the session isn't the one on screen when the job
-finishes, a transient toast announces it with a `View` button that jumps
-straight to that session. A running job can be cancelled from its message
-bubble; a stalled or failed one offers "Check again" or "Try again".
+base…" used for an ordinary synchronous answer; if a session somehow has both
+an active research job and an ordinary query in flight, the header always
+reports the research job, since it is the longer-running and less obvious
+state. The sidebar row for that session shows a "· Researching" dot; once the
+job completes it flips to "· Ready" until the result is opened. If the
+session isn't the one on screen when the job finishes, a transient toast
+announces it with a `View` button that jumps straight to that session. A
+running job can be cancelled from its message bubble; a stalled one offers
+"Check again"; a failed one offers "Try again" unless the failure was a
+quota or rate-limit rejection, which cannot succeed on retry.
 
 ---
 
@@ -116,7 +124,8 @@ bubble; a stalled or failed one offers "Check again" or "Try again".
   come back with verified, linked web authorities. Trigger it from a consent
   card or the Research toggle in the input bar; track it via the header's
   "Researching" pill, a sidebar "· Researching" / "· Ready" dot, and a
-  completion toast; cancel a running job or retry a failed one from its bubble
+  completion toast (exactly one per job, even with several tabs open); cancel
+  a running job, or retry one that failed for a reason retrying can fix
 - **Document search mode** — toggle the 🔍 icon in the input bar
 - **Dark / Light mode** — segmented toggle in sidebar footer, persisted
 - **Conversation history** — lazy-loaded from API on first session open

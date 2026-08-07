@@ -135,10 +135,10 @@ export default function ChatArea() {
               {activeSession?.title ?? 'Legal AI Assistant'}
             </h1>
             <p className={`text-[11px] ${isDark ? 'text-white/40' : 'text-charcoal/38'}`}>
-              {isQuerying
-                ? 'Searching knowledge base…'
-                : activeJob
-                  ? 'Researching…'
+              {activeJob
+                ? 'Researching…'
+                : isQuerying
+                  ? 'Searching knowledge base…'
                   : activeSession
                     ? `${activeSession.messageCount} message${activeSession.messageCount !== 1 ? 's' : ''}`
                     : 'Perchstone & Graeys'
