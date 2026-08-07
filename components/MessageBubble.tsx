@@ -240,6 +240,7 @@ export default function MessageBubble({
   message,
   isDark,
   researchJob,
+  resumeNotice,
   onRunResearch,
   onAnswerNow,
   onDismissResearch,
@@ -250,6 +251,8 @@ export default function MessageBubble({
   message: Message;
   isDark: boolean;
   researchJob?: ResearchJobRecord;
+  /** Inline feedback for a "Check again" click that couldn't proceed. */
+  resumeNotice?: string;
   onRunResearch?: () => void;
   onAnswerNow?: () => void;
   onDismissResearch?: () => void;
@@ -325,6 +328,7 @@ export default function MessageBubble({
               onCancel={() => onCancelResearch?.()}
               onResume={() => onResumeResearch?.()}
               onRetry={() => onRetryResearch?.()}
+              notice={resumeNotice}
             />
           ) : !message.content && message.isStreaming ? (
             <ThinkingDots isDark={isDark} label={message.researchStatus} />

@@ -117,13 +117,17 @@ const RUNNING_LABELS: Record<string, string> = {
 };
 
 export function ResearchProgress({
-  job, isDark, onCancel, onResume, onRetry,
+  job, isDark, onCancel, onResume, onRetry, notice,
 }: {
   job: ResearchJobRecord;
   isDark: boolean;
   onCancel: () => void;
   onResume: () => void;
   onRetry: () => void;
+  /** Inline feedback for a "Check again" click that couldn't proceed (job
+   *  gone/no-longer-stalled, or another job already active in this session).
+   *  No dialog — this renders in place, themed like the rest of the card. */
+  notice?: string;
 }) {
   const elapsed = useElapsed(job.startedAt);
   const muted = isDark ? 'text-white/40' : 'text-charcoal/45';
@@ -161,17 +165,20 @@ export function ResearchProgress({
 
   if (job.status === 'STALLED') {
     return (
-      <div aria-live="polite" className="flex items-center gap-2 flex-wrap">
-        <span className={`text-[12.5px] ${body}`}>{job.error ?? 'Still running.'}</span>
-        <button
-          onClick={onResume}
-          className={`px-2.5 py-1 rounded-lg text-[11.5px] font-medium border transition-colors
-            ${isDark
-              ? 'border-white/12 text-white/65 hover:text-white/90 hover:border-white/22'
-              : 'border-charcoal/14 text-charcoal/60 hover:text-charcoal/85 hover:border-charcoal/24'}`}
-        >
-          Check again
-        </button>
+      <div aria-live="polite">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={`text-[12.5px] ${body}`}>{job.error ?? 'Still running.'}</span>
+          <button
+            onClick={onResume}
+            className={`px-2.5 py-1 rounded-lg text-[11.5px] font-medium border transition-colors
+              ${isDark
+                ? 'border-white/12 text-white/65 hover:text-white/90 hover:border-white/22'
+                : 'border-charcoal/14 text-charcoal/60 hover:text-charcoal/85 hover:border-charcoal/24'}`}
+          >
+            Check again
+          </button>
+        </div>
+        {notice && <p className={`mt-1 text-[11.5px] ${muted}`}>{notice}</p>}
       </div>
     );
   }

@@ -21,6 +21,7 @@ import {
   WebSource,
 } from './api';
 import {
+  cancelResearchJob,
   dropSessionJobs,
   markResearchSeen,
   submitResearchJob,
@@ -297,6 +298,7 @@ interface ChatContextValue {
   runResearch: (sessionId: string, messageId: string, question: string) => Promise<void>;
   answerWithoutResearch: (sessionId: string, messageId: string, question: string) => Promise<void>;
   dismissResearch: (sessionId: string, messageId: string) => void;
+  cancelResearch: (sessionId: string, messageId: string, jobId: string) => void;
 }
 
 const Ctx = createContext<ChatContextValue | null>(null);
@@ -705,6 +707,21 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Cancel is the one termination path that must not leave the message in
+  // limbo: the job record disappears, so the message itself needs to carry
+  // a stable terminal state or it falls back to unlabeled thinking dots
+  // forever (and that survives a reload, since sessions persist).
+  const cancelResearch = useCallback((sessionId: string, messageId: string, jobId: string) => {
+    cancelResearchJob(jobId);
+    dispatch({
+      type: 'PATCH_MESSAGE',
+      payload: {
+        sessionId, messageId,
+        patch: { researchJobId: undefined, isStreaming: false, content: '*Research cancelled.*' },
+      },
+    });
+  }, []);
+
   const toggleDark    = useCallback(() => dispatch({ type: 'TOGGLE_DARK' }), []);
   const toggleSidebar = useCallback(() => dispatch({ type: 'TOGGLE_SIDEBAR' }), []);
   const setSidebar    = useCallback((v: boolean) => dispatch({ type: 'SET_SIDEBAR', payload: v }), []);
@@ -715,7 +732,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <Ctx.Provider value={{ state, activeSession, sendMessage, createSession, switchSession, deleteSession, toggleDark, toggleSidebar, setSidebar, isSessionQuerying, runResearch, answerWithoutResearch, dismissResearch }}>
+    <Ctx.Provider value={{ state, activeSession, sendMessage, createSession, switchSession, deleteSession, toggleDark, toggleSidebar, setSidebar, isSessionQuerying, runResearch, answerWithoutResearch, dismissResearch, cancelResearch }}>
       {children}
     </Ctx.Provider>
   );

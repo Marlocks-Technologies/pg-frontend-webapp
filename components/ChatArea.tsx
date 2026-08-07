@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/lib/chatStore';
-import { cancelResearchJob, resumeResearchJob, ResearchBusyError } from '@/lib/researchJobs';
+import { resumeResearchJob, ResearchBusyError } from '@/lib/researchJobs';
 import MessageBubble from './MessageBubble';
 import ChatInput from './ChatInput';
 
@@ -74,11 +74,18 @@ export default function ChatArea() {
     runResearch,
     answerWithoutResearch,
     dismissResearch,
+    cancelResearch,
   } = useChatStore();
   const { isDark, isSidebarOpen } = state;
   const isQuerying = isSessionQuerying(state.activeSessionId);
   const bottomRef = useRef<HTMLDivElement>(null);
   const hasMessages = (activeSession?.messages.length ?? 0) > 0;
+
+  // Inline feedback for a "Check again" click that couldn't proceed — keyed
+  // by message id so only the bubble the user actually clicked shows it.
+  // No dialog: resumeResearchJob's mixed contract (false / throw / true)
+  // means both failure branches are realistic, not rare edge cases.
+  const [resumeNotice, setResumeNotice] = useState<{ messageId: string; text: string } | null>(null);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -175,6 +182,7 @@ export default function ChatArea() {
                     ? state.researchJobs.find(j => j.jobId === msg.researchJobId)
                     : undefined
                 }
+                resumeNotice={resumeNotice?.messageId === msg.id ? resumeNotice.text : undefined}
                 onRunResearch={() =>
                   msg.researchPrompt &&
                   runResearch(activeSession!.id, msg.id, msg.researchPrompt.question)}
@@ -182,23 +190,41 @@ export default function ChatArea() {
                   msg.researchPrompt &&
                   answerWithoutResearch(activeSession!.id, msg.id, msg.researchPrompt.question)}
                 onDismissResearch={() => dismissResearch(activeSession!.id, msg.id)}
-                onCancelResearch={() => msg.researchJobId && cancelResearchJob(msg.researchJobId)}
+                onCancelResearch={() => {
+                  setResumeNotice(null);
+                  if (msg.researchJobId) cancelResearch(activeSession!.id, msg.id, msg.researchJobId);
+                }}
                 onResumeResearch={() => {
                   if (!msg.researchJobId) return;
+                  setResumeNotice(null);
                   try {
                     const resumed = resumeResearchJob(msg.researchJobId);
                     if (!resumed) {
-                      alert('This research job can no longer be resumed — it may have finished, failed, or been cancelled already.');
+                      setResumeNotice({
+                        messageId: msg.id,
+                        text: 'This research job can no longer be resumed — it may have finished, failed, or been cancelled already.',
+                      });
                     }
                   } catch (error) {
                     if (error instanceof ResearchBusyError) {
-                      alert('Another research job is already running in this session. Wait for it to finish before checking this one again.');
+                      setResumeNotice({
+                        messageId: msg.id,
+                        text: 'Another research job is already running in this session. Wait for it to finish before checking this one again.',
+                      });
                     } else {
-                      throw error;
+                      // Genuinely unexpected — this repo has no error boundary
+                      // or window.onerror reporting, so log it explicitly
+                      // rather than let a rethrow vanish silently.
+                      console.error('Unexpected error resuming research job', error);
+                      setResumeNotice({
+                        messageId: msg.id,
+                        text: 'Something went wrong checking on this job. Please try again.',
+                      });
                     }
                   }
                 }}
                 onRetryResearch={() => {
+                  setResumeNotice(null);
                   const job = msg.researchJobId
                     ? state.researchJobs.find(j => j.jobId === msg.researchJobId)
                     : undefined;
