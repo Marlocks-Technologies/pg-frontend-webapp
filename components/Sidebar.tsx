@@ -93,6 +93,9 @@ function SessionRow({
             {researchJob && (researchJob.status === 'QUEUED' || researchJob.status === 'RUNNING') && (
               <span className="ml-1.5 opacity-70">· Researching</span>
             )}
+            {researchJob && researchJob.status === 'COMPLETED' && !researchJob.seen && (
+              <span className="ml-1.5 opacity-70">· Ready</span>
+            )}
           </p>
         </div>
       </div>
@@ -304,7 +307,9 @@ export default function Sidebar({
                   e.stopPropagation();
                   deleteSession(session.id);
                 }}
-                researchJob={state.researchJobs.find(j => j.sessionId === session.id)}
+                researchJob={state.researchJobs
+                  .filter(j => j.sessionId === session.id)
+                  .sort((a, b) => b.startedAt - a.startedAt)[0]}
               />
             ))
           )}
