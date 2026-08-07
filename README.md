@@ -48,6 +48,7 @@ npm run dev
 | `POST` | `/chat/query` | Send a question, receive an AI answer with citations |
 | `POST` | `/chat/research` | Queue a verified Nigerian legal opinion (via `/api/research`) |
 | `GET` | `/chat/research/:jobId` | Poll a research job (via `/api/research/:jobId`) |
+| `GET` | `/api/research/status` | Whether `RESEARCH_API_KEY` is set (boolean only) |
 | `GET` | `/chat/history/:sessionId` | Load existing conversation history |
 | `DELETE` | `/chat/session/:sessionId` | Delete a stored conversation |
 | `POST` | `/chat/search` | Semantic search across documents (no AI answer) |
@@ -75,7 +76,32 @@ opinion along with the web authorities the backend actually audited.
 Those two endpoints sit behind an API-key usage plan, since each job spends money
 on AgentCore web search. The key must never reach the browser, so requests go
 through this app's own route handlers — `app/api/research/*` — which attach
-`RESEARCH_API_KEY` server-side.
+`RESEARCH_API_KEY` server-side. `GET /api/research/status` reports only whether
+the key is configured (a boolean, never the key itself), so the UI can avoid
+offering a Run button that would just 503.
+
+The flow is consent-first. When `/chat/query` returns 409, the message offers to
+run the research or, for questions of 1000 characters or fewer, to answer
+immediately instead — above that length the backend rejects a non-research query,
+so only research is offered. If the key isn't configured, the consent card says
+so and omits the Run button entirely. The Research toggle in the input bar asks
+for depth directly, which is the only route for a short question the heuristic
+would not flag.
+
+Jobs are owned by `lib/researchJobs.ts`, which persists them to localStorage and
+resumes polling after a reload, so closing the tab does not lose an opinion the
+backend has already paid to produce. One job runs per session; several can run
+across sessions. Only one browser tab polls, elected by a heartbeat lock, so
+several open tabs never race the backend or double-announce a result.
+
+While a job is queued or running, the chat header names it — "Researching…" with
+an amber "Researching" pill — instead of the generic "Searching knowledge
+base…" used for an ordinary synchronous answer. The sidebar row for that session
+shows a "· Researching" dot; once the job completes it flips to "· Ready" until
+the result is opened. If the session isn't the one on screen when the job
+finishes, a transient toast announces it with a `View` button that jumps
+straight to that session. A running job can be cancelled from its message
+bubble; a stalled or failed one offers "Check again" or "Try again".
 
 ---
 
@@ -87,7 +113,10 @@ through this app's own route handlers — `app/api/research/*` — which attach
 - **Markdown rendering** — bold, italic, headings, lists, blockquotes, code
 - **Collapsible citations panel** on each AI response
 - **Deep legal research** — long authority-heavy questions run asynchronously and
-  come back with verified, linked web authorities
+  come back with verified, linked web authorities. Trigger it from a consent
+  card or the Research toggle in the input bar; track it via the header's
+  "Researching" pill, a sidebar "· Researching" / "· Ready" dot, and a
+  completion toast; cancel a running job or retry a failed one from its bubble
 - **Document search mode** — toggle the 🔍 icon in the input bar
 - **Dark / Light mode** — segmented toggle in sidebar footer, persisted
 - **Conversation history** — lazy-loaded from API on first session open

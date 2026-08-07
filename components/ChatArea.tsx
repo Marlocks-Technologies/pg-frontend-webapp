@@ -78,6 +78,10 @@ export default function ChatArea() {
   } = useChatStore();
   const { isDark, isSidebarOpen } = state;
   const isQuerying = isSessionQuerying(state.activeSessionId);
+  const activeJob = state.researchJobs.find(
+    j => j.sessionId === activeSession?.id &&
+         (j.status === 'QUEUED' || j.status === 'RUNNING')
+  );
   const bottomRef = useRef<HTMLDivElement>(null);
   const hasMessages = (activeSession?.messages.length ?? 0) > 0;
 
@@ -133,21 +137,23 @@ export default function ChatArea() {
             <p className={`text-[11px] ${isDark ? 'text-white/40' : 'text-charcoal/38'}`}>
               {isQuerying
                 ? 'Searching knowledge base…'
-                : activeSession
-                  ? `${activeSession.messageCount} message${activeSession.messageCount !== 1 ? 's' : ''}`
-                  : 'Perchstone & Graeys'
+                : activeJob
+                  ? 'Researching…'
+                  : activeSession
+                    ? `${activeSession.messageCount} message${activeSession.messageCount !== 1 ? 's' : ''}`
+                    : 'Perchstone & Graeys'
               }
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          {isQuerying && (
+          {(isQuerying || activeJob) && (
             <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium
               ${isDark ? 'bg-amber-400/10 text-amber-400' : 'bg-charcoal/8 text-charcoal/60'}`}
             >
               <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
-              Thinking
+              {activeJob ? 'Researching' : 'Thinking'}
             </div>
           )}
 
