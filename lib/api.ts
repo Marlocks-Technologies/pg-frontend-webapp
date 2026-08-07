@@ -271,6 +271,16 @@ export async function getLegalResearchJob(jobId: string): Promise<LegalResearchJ
   return handleResponse<LegalResearchJob>(res);
 }
 
+export async function getResearchStatus(): Promise<{ configured: boolean }> {
+  try {
+    const res = await fetch(`${RESEARCH_URL}/status`, { cache: 'no-store' });
+    if (!res.ok) return { configured: false };
+    return (await res.json()) as { configured: boolean };
+  } catch {
+    return { configured: false };
+  }
+}
+
 // ─── 3. Document Search  POST /chat/search ────────────────────────────────────
 
 export interface SearchRequest {
