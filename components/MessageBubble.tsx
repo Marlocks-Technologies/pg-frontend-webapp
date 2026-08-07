@@ -1,8 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Message } from '@/lib/chatStore';
-import { Citation, GeneratedArtifact, WebSource, artifactDownloadUrl } from '@/lib/api';
+import {
+  Citation,
+  GeneratedArtifact,
+  GenerateDocumentOptions,
+  WebSource,
+  artifactDownloadUrl,
+  getDocumentDetails,
+} from '@/lib/api';
 import { type ResearchJobRecord } from '@/lib/researchJobs';
 import MarkdownMessage from './MarkdownMessage';
 import { ResearchConsent, ResearchProgress } from './ResearchCard';
@@ -74,6 +81,72 @@ function ArtifactCard({ artifact, isDark }: { artifact: GeneratedArtifact; isDar
         </svg>
         Download
       </a>
+    </div>
+  );
+}
+
+// ─── Blocked styled-download notice ───────────────────────────────────────────
+//
+// A research answer can carry the format/style the user picked in Generate
+// mode (pendingGenerate) before the request turned out to need research.
+// There is deliberately no button that renders it: /documents/generate only
+// re-runs its own RAG from a prompt, so styling the finished opinion would
+// require sending the opinion back through generation and hoping it comes
+// out unchanged — it doesn't, and the user would end up with a downloadable
+// document that isn't the answer above it. This stays disabled until the
+// backend accepts already-written content to render (tracked in
+// docs/BACKEND_ASK-styled-document-from-content.md).
+
+const PENDING_FORMAT_LABELS: Record<string, string> = {
+  docx: 'Word', pdf: 'PDF', pptx: 'Slides', xlsx: 'Sheet',
+};
+
+function PendingGenerateNotice({
+  options, isDark,
+}: {
+  options: GenerateDocumentOptions;
+  isDark: boolean;
+}) {
+  const [refFilename, setRefFilename] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    if (options.referenceDocumentId) {
+      getDocumentDetails(options.referenceDocumentId)
+        .then(doc => { if (live) setRefFilename(doc.filename); })
+        .catch(() => { /* Fall back to the generic label below. */ });
+    }
+    return () => { live = false; };
+  }, [options.referenceDocumentId]);
+
+  const formatLabel = options.format ? (PENDING_FORMAT_LABELS[options.format] ?? options.format.toUpperCase()) : 'document';
+  const title = refFilename
+    ? `Download as ${formatLabel} (styled after ${refFilename}) — not available yet`
+    : `Download as ${formatLabel} — not available yet`;
+
+  return (
+    <div
+      className={`pg-rise mt-3 flex items-start gap-3 p-3 rounded-lg border cursor-not-allowed
+        ${isDark ? 'bg-white/4 border-white/[0.07]' : 'bg-charcoal/[0.03] border-charcoal/[0.07]'}`}
+    >
+      <div
+        className={`shrink-0 mt-0.5 w-9 h-9 rounded-lg border flex items-center justify-center
+          ${isDark ? 'border-white/10 text-white/30' : 'border-charcoal/12 text-charcoal/30'}`}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7,10 12,15 17,10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+      </div>
+      <div className="min-w-0">
+        <p className={`text-[12.5px] font-medium leading-snug ${isDark ? 'text-white/45' : 'text-charcoal/45'}`}>
+          {title}
+        </p>
+        <p className={`mt-1 text-[11px] leading-relaxed ${isDark ? 'text-white/30' : 'text-charcoal/32'}`}>
+          Rendering a finished opinion into a styled document needs a backend change that is in progress.
+        </p>
+      </div>
     </div>
   );
 }
@@ -358,6 +431,26 @@ export default function MessageBubble({
           {!isUser && !message.isError && message.artifact && (
             <ArtifactCard artifact={message.artifact} isDark={isDark} />
           )}
+
+          {/* Document generation failed after an otherwise-good answer — the
+              answer text above stands regardless. */}
+          {!isUser && !message.isError && !message.artifact && message.artifactError && (
+            <p className={`mt-3 text-[11.5px] leading-relaxed ${isDark ? 'text-white/40' : 'text-charcoal/40'}`}>
+              Document generation failed: {message.artifactError}
+            </p>
+          )}
+
+          {/* Styled download the user asked for in Generate mode, blocked on
+              the backend accepting already-written content to render. Only
+              once the research answer has actually landed — pendingGenerate
+              is set the moment the consent card appears, well before there
+              is anything to (not) download yet. */}
+          {!isUser && !message.isError && !message.isStreaming && !message.artifact &&
+            !message.researchPrompt &&
+            !(researchJob && researchJob.status !== 'COMPLETED') &&
+            message.pendingGenerate && (
+              <PendingGenerateNotice options={message.pendingGenerate} isDark={isDark} />
+            )}
 
           {/* Citations */}
           {!isUser && !message.isError && !!message.citations?.length && (
