@@ -286,6 +286,8 @@ export async function submitResearchJob(input: {
   sessionId: string;
   messageId: string;
   question: string;
+  /** Template whose conventions should shape how the opinion is written. */
+  referenceDocumentId?: string;
 }): Promise<ResearchJobRecord> {
   const existing = getSessionJob(input.sessionId);
   if (existing && isActive(existing)) throw new ResearchBusyError(existing);
@@ -293,6 +295,9 @@ export async function submitResearchJob(input: {
   const response = await startLegalResearch({
     question: input.question,
     sessionId: input.sessionId,
+    ...(input.referenceDocumentId
+      ? { referenceDocumentId: input.referenceDocumentId }
+      : {}),
   });
 
   const now = Date.now();

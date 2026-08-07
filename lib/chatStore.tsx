@@ -807,12 +807,25 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   // ── Deep research consent actions ──────────────────────────────────────────
   const runResearch = useCallback(async (sessionId: string, messageId: string, question: string) => {
+    // A template chosen before the question routed to research shapes how the
+    // opinion is WRITTEN, not just how it is later rendered — so it has to
+    // travel with the job rather than waiting for the download.
+    const referenceDocumentId = state.sessions
+      .find(s => s.id === sessionId)
+      ?.messages.find(m => m.id === messageId)
+      ?.pendingGenerate?.referenceDocumentId;
+
     dispatch({
       type: 'PATCH_MESSAGE',
       payload: { sessionId, messageId, patch: { researchPrompt: undefined, isStreaming: true } },
     });
     try {
-      const job = await submitResearchJob({ sessionId, messageId, question });
+      const job = await submitResearchJob({
+        sessionId,
+        messageId,
+        question,
+        ...(referenceDocumentId ? { referenceDocumentId } : {}),
+      });
       dispatch({
         type: 'PATCH_MESSAGE',
         payload: { sessionId, messageId, patch: { researchJobId: job.jobId, isResearch: true } },
@@ -830,7 +843,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         },
       });
     }
-  }, []);
+    // Reads state.sessions to find the message's pendingGenerate template, so
+    // it must not close over a stale sessions array.
+  }, [state.sessions]);
 
   // Skips the /chat/query round trip entirely: the user asked for depth
   // directly, so there is no heuristic to consult and nothing to 409 on.
