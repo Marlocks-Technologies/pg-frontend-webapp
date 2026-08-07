@@ -3,8 +3,9 @@
 import { useState } from 'react';
 import { Message } from '@/lib/chatStore';
 import { Citation, GeneratedArtifact, WebSource, artifactDownloadUrl } from '@/lib/api';
+import { type ResearchJobRecord } from '@/lib/researchJobs';
 import MarkdownMessage from './MarkdownMessage';
-import { ResearchConsent } from './ResearchCard';
+import { ResearchConsent, ResearchProgress } from './ResearchCard';
 
 // ─── Generated artifact card ──────────────────────────────────────────────────
 
@@ -238,15 +239,23 @@ function ThinkingDots({ isDark, label }: { isDark: boolean; label?: string }) {
 export default function MessageBubble({
   message,
   isDark,
+  researchJob,
   onRunResearch,
   onAnswerNow,
   onDismissResearch,
+  onCancelResearch,
+  onResumeResearch,
+  onRetryResearch,
 }: {
   message: Message;
   isDark: boolean;
+  researchJob?: ResearchJobRecord;
   onRunResearch?: () => void;
   onAnswerNow?: () => void;
   onDismissResearch?: () => void;
+  onCancelResearch?: () => void;
+  onResumeResearch?: () => void;
+  onRetryResearch?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
@@ -308,6 +317,14 @@ export default function MessageBubble({
               onRun={() => onRunResearch?.()}
               onAnswerNow={() => onAnswerNow?.()}
               onDismiss={() => onDismissResearch?.()}
+            />
+          ) : researchJob && researchJob.status !== 'COMPLETED' ? (
+            <ResearchProgress
+              job={researchJob}
+              isDark={isDark}
+              onCancel={() => onCancelResearch?.()}
+              onResume={() => onResumeResearch?.()}
+              onRetry={() => onRetryResearch?.()}
             />
           ) : !message.content && message.isStreaming ? (
             <ThinkingDots isDark={isDark} label={message.researchStatus} />

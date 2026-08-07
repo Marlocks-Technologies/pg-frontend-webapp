@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { getResearchStatus } from '@/lib/api';
+import { type ResearchJobRecord } from '@/lib/researchJobs';
 
 export function ResearchConsent({
   question,
@@ -95,4 +96,108 @@ export function ResearchConsent({
       </div>
     </div>
   );
+}
+
+// ─── Research progress (running / stalled / failed) ───────────────────────────
+
+/** Ticks once a second from the job's persisted start, so a reload is honest. */
+function useElapsed(startedAt: number): string {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const total = Math.max(0, Math.floor((now - startedAt) / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+const RUNNING_LABELS: Record<string, string> = {
+  QUEUED: 'Queued for deep legal research…',
+  RUNNING: 'Searching Nigerian authorities and verifying citations…',
+};
+
+export function ResearchProgress({
+  job, isDark, onCancel, onResume, onRetry,
+}: {
+  job: ResearchJobRecord;
+  isDark: boolean;
+  onCancel: () => void;
+  onResume: () => void;
+  onRetry: () => void;
+}) {
+  const elapsed = useElapsed(job.startedAt);
+  const muted = isDark ? 'text-white/40' : 'text-charcoal/45';
+  const body = isDark ? 'text-white/60' : 'text-charcoal/60';
+
+  if (job.status === 'QUEUED' || job.status === 'RUNNING') {
+    const longRunning = Date.now() - job.startedAt > 10 * 60 * 1000;
+    return (
+      <div aria-live="polite">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="flex items-center gap-1.5">
+            {[0, 0.15, 0.3].map((delay, i) => (
+              <span key={i}
+                className={`pg-dot w-1.5 h-1.5 rounded-full ${isDark ? 'bg-white/60' : 'bg-charcoal/50'}`}
+                style={{ animationDelay: `${delay}s` }}
+              />
+            ))}
+          </span>
+          <span className={`text-[12.5px] ${body}`}>{RUNNING_LABELS[job.status]}</span>
+          <span className={`text-[11.5px] tabular-nums ${muted}`}>{elapsed}</span>
+          <button
+            onClick={onCancel}
+            className={`text-[11.5px] underline underline-offset-2 transition-colors
+              ${isDark ? 'text-white/35 hover:text-white/65' : 'text-charcoal/35 hover:text-charcoal/65'}`}
+          >
+            Cancel
+          </button>
+        </div>
+        <p className={`mt-1 text-[11.5px] ${muted}`}>
+          {longRunning ? 'Taking longer than usual — still running.' : 'Typically 2–10 minutes.'}
+        </p>
+      </div>
+    );
+  }
+
+  if (job.status === 'STALLED') {
+    return (
+      <div aria-live="polite" className="flex items-center gap-2 flex-wrap">
+        <span className={`text-[12.5px] ${body}`}>{job.error ?? 'Still running.'}</span>
+        <button
+          onClick={onResume}
+          className={`px-2.5 py-1 rounded-lg text-[11.5px] font-medium border transition-colors
+            ${isDark
+              ? 'border-white/12 text-white/65 hover:text-white/90 hover:border-white/22'
+              : 'border-charcoal/14 text-charcoal/60 hover:text-charcoal/85 hover:border-charcoal/24'}`}
+        >
+          Check again
+        </button>
+      </div>
+    );
+  }
+
+  if (job.status === 'FAILED') {
+    // A quota rejection cannot succeed on retry, so no button is offered.
+    const isQuota = /quota|throttl/i.test(job.error ?? '');
+    return (
+      <div aria-live="polite" className="flex items-center gap-2 flex-wrap">
+        <span className={`text-[12.5px] ${isDark ? 'text-red-300' : 'text-red-600'}`}>
+          {job.error ?? 'The research job failed.'}
+        </span>
+        {!isQuota && (
+          <button
+            onClick={onRetry}
+            className={`px-2.5 py-1 rounded-lg text-[11.5px] font-medium border transition-colors
+              ${isDark
+                ? 'border-white/12 text-white/65 hover:text-white/90 hover:border-white/22'
+                : 'border-charcoal/14 text-charcoal/60 hover:text-charcoal/85 hover:border-charcoal/24'}`}
+          >
+            Try again
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return null;
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useChatStore } from '@/lib/chatStore';
+import { cancelResearchJob, resumeResearchJob, ResearchBusyError } from '@/lib/researchJobs';
 import MessageBubble from './MessageBubble';
 import ChatInput from './ChatInput';
 
@@ -169,6 +170,11 @@ export default function ChatArea() {
                 key={msg.id}
                 message={msg}
                 isDark={isDark}
+                researchJob={
+                  msg.researchJobId
+                    ? state.researchJobs.find(j => j.jobId === msg.researchJobId)
+                    : undefined
+                }
                 onRunResearch={() =>
                   msg.researchPrompt &&
                   runResearch(activeSession!.id, msg.id, msg.researchPrompt.question)}
@@ -176,6 +182,28 @@ export default function ChatArea() {
                   msg.researchPrompt &&
                   answerWithoutResearch(activeSession!.id, msg.id, msg.researchPrompt.question)}
                 onDismissResearch={() => dismissResearch(activeSession!.id, msg.id)}
+                onCancelResearch={() => msg.researchJobId && cancelResearchJob(msg.researchJobId)}
+                onResumeResearch={() => {
+                  if (!msg.researchJobId) return;
+                  try {
+                    const resumed = resumeResearchJob(msg.researchJobId);
+                    if (!resumed) {
+                      alert('This research job can no longer be resumed — it may have finished, failed, or been cancelled already.');
+                    }
+                  } catch (error) {
+                    if (error instanceof ResearchBusyError) {
+                      alert('Another research job is already running in this session. Wait for it to finish before checking this one again.');
+                    } else {
+                      throw error;
+                    }
+                  }
+                }}
+                onRetryResearch={() => {
+                  const job = msg.researchJobId
+                    ? state.researchJobs.find(j => j.jobId === msg.researchJobId)
+                    : undefined;
+                  if (job) runResearch(activeSession!.id, msg.id, job.question);
+                }}
               />
             ))}
             <div ref={bottomRef} />
