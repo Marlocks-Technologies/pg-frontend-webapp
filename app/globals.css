@@ -267,3 +267,26 @@
   0%, 60%, 100% { opacity: 0.35; }
   30% { opacity: 1; }
 }
+
+/* ─── Research indicator ──────────────────────────────────────────────── */
+
+@keyframes pg-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.45; transform: scale(0.82); }
+}
+
+.pg-pulse {
+  animation: pg-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* State feedback stays, movement goes: opacity-only pulse */
+  .pg-pulse {
+    animation: pg-pulse-still 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes pg-pulse-still {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
