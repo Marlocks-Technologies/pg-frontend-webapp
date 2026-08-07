@@ -2,8 +2,10 @@
 
 import { useState } from 'react';
 import { Message } from '@/lib/chatStore';
-import { Citation, GeneratedArtifact, artifactDownloadUrl } from '@/lib/api';
+import { Citation, GeneratedArtifact, WebSource, artifactDownloadUrl } from '@/lib/api';
+import { type ResearchJobRecord } from '@/lib/researchJobs';
 import MarkdownMessage from './MarkdownMessage';
+import { ResearchConsent, ResearchProgress } from './ResearchCard';
 
 // ─── Generated artifact card ──────────────────────────────────────────────────
 
@@ -133,18 +135,101 @@ function CitationsPanel({ citations, isDark }: { citations: Citation[]; isDark: 
   );
 }
 
+// ─── Verified web authorities ─────────────────────────────────────────────────
+//
+// Only async legal-research answers carry these: sources the backend actually
+// retrieved and audited, ranked by how authoritative the domain is.
+
+const TIER_LABELS: Record<string, string> = {
+  official: 'Official',
+  legal_reporter: 'Law report',
+  reporter: 'Law report',
+  general: 'General web',
+};
+
+function tierLabel(tier?: string): string | null {
+  if (!tier) return null;
+  return TIER_LABELS[tier] ?? tier.replace(/_/g, ' ');
+}
+
+function WebSourcesPanel({ sources, isDark }: { sources: WebSource[]; isDark: boolean }) {
+  const [open, setOpen] = useState(false);
+  if (!sources.length) return null;
+
+  return (
+    <div className="mt-3 pt-3 border-t border-current/10">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className={`flex items-center gap-1.5 text-[11px] font-semibold tracking-wide uppercase transition-colors duration-200
+          ${isDark ? 'text-white/45 hover:text-white/80' : 'text-charcoal/45 hover:text-charcoal/75'}`}
+      >
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="2" y1="12" x2="22" y2="12"/>
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+        </svg>
+        {sources.length} verified {sources.length === 1 ? 'authority' : 'authorities'}
+        <svg
+          width="10" height="10" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2.5"
+          className={`transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+        >
+          <polyline points="6,9 12,15 18,9"/>
+        </svg>
+      </button>
+
+      <div className="pg-expand" data-open={open}>
+        <div>
+          <div className="mt-2 space-y-2">
+            {sources.map((s, i) => {
+              const tier = tierLabel(s.authority_tier);
+              return (
+                <a
+                  key={s.url || i}
+                  href={s.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`block p-2.5 rounded-lg text-xs leading-relaxed border transition-colors duration-200
+                    ${isDark
+                      ? 'bg-white/4 border-white/[0.07] hover:border-white/15'
+                      : 'bg-charcoal/4 border-charcoal/[0.07] hover:border-charcoal/15'
+                    }`}
+                >
+                  <p className={`font-semibold ${isDark ? 'text-white/70' : 'text-charcoal/75'}`}>
+                    {s.title || s.url}
+                  </p>
+                  <p className={`mt-1 text-[10px] font-medium ${isDark ? 'text-white/35' : 'text-charcoal/35'}`}>
+                    {[s.domain, tier, s.published_date].filter(Boolean).join(' · ')}
+                  </p>
+                </a>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Thinking indicator ───────────────────────────────────────────────────────
 
-function ThinkingDots({ isDark }: { isDark: boolean }) {
+function ThinkingDots({ isDark, label }: { isDark: boolean; label?: string }) {
   return (
-    <span className="flex items-center gap-1.5 py-0.5">
-      {[0, 0.15, 0.3].map((delay, i) => (
-        <span
-          key={i}
-          className={`pg-dot w-1.5 h-1.5 rounded-full ${isDark ? 'bg-white/60' : 'bg-charcoal/50'}`}
-          style={{ animationDelay: `${delay}s` }}
-        />
-      ))}
+    <span className="flex items-center gap-2 py-0.5">
+      <span className="flex items-center gap-1.5">
+        {[0, 0.15, 0.3].map((delay, i) => (
+          <span
+            key={i}
+            className={`pg-dot w-1.5 h-1.5 rounded-full ${isDark ? 'bg-white/60' : 'bg-charcoal/50'}`}
+            style={{ animationDelay: `${delay}s` }}
+          />
+        ))}
+      </span>
+      {label && (
+        <span className={`text-[11.5px] ${isDark ? 'text-white/45' : 'text-charcoal/45'}`}>
+          {label}
+        </span>
+      )}
     </span>
   );
 }
@@ -154,9 +239,26 @@ function ThinkingDots({ isDark }: { isDark: boolean }) {
 export default function MessageBubble({
   message,
   isDark,
+  researchJob,
+  resumeNotice,
+  onRunResearch,
+  onAnswerNow,
+  onDismissResearch,
+  onCancelResearch,
+  onResumeResearch,
+  onRetryResearch,
 }: {
   message: Message;
   isDark: boolean;
+  researchJob?: ResearchJobRecord;
+  /** Inline feedback for a "Check again" click that couldn't proceed. */
+  resumeNotice?: string;
+  onRunResearch?: () => void;
+  onAnswerNow?: () => void;
+  onDismissResearch?: () => void;
+  onCancelResearch?: () => void;
+  onResumeResearch?: () => void;
+  onRetryResearch?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
@@ -210,8 +312,26 @@ export default function MessageBubble({
           `}
         >
           {/* Content */}
-          {!message.content && message.isStreaming ? (
-            <ThinkingDots isDark={isDark} />
+          {message.researchPrompt ? (
+            <ResearchConsent
+              question={message.researchPrompt.question}
+              canAnswerNow={message.researchPrompt.canAnswerNow}
+              isDark={isDark}
+              onRun={() => onRunResearch?.()}
+              onAnswerNow={() => onAnswerNow?.()}
+              onDismiss={() => onDismissResearch?.()}
+            />
+          ) : researchJob && researchJob.status !== 'COMPLETED' ? (
+            <ResearchProgress
+              job={researchJob}
+              isDark={isDark}
+              onCancel={() => onCancelResearch?.()}
+              onResume={() => onResumeResearch?.()}
+              onRetry={() => onRetryResearch?.()}
+              notice={resumeNotice}
+            />
+          ) : !message.content && message.isStreaming ? (
+            <ThinkingDots isDark={isDark} label={message.researchStatus} />
           ) : isUser ? (
             // User messages: plain text, preserve newlines
             <span className="whitespace-pre-wrap break-words leading-[1.7] text-white">
@@ -242,6 +362,11 @@ export default function MessageBubble({
           {/* Citations */}
           {!isUser && !message.isError && !!message.citations?.length && (
             <CitationsPanel citations={message.citations} isDark={isDark} />
+          )}
+
+          {/* Verified web authorities (async legal research only) */}
+          {!isUser && !message.isError && !!message.webSources?.length && (
+            <WebSourcesPanel sources={message.webSources} isDark={isDark} />
           )}
         </div>
 
@@ -278,6 +403,16 @@ export default function MessageBubble({
                 </>
               )}
             </button>
+          )}
+
+          {message.isResearch && !message.isError && (
+            <span className="flex items-center gap-1 opacity-70">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M9 12l2 2 4-4"/>
+                <circle cx="12" cy="12" r="10"/>
+              </svg>
+              Verified research
+            </span>
           )}
 
           {message.chunksRetrieved !== undefined && (

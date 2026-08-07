@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test": "vitest",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
@@ -22,9 +23,11 @@
     "autoprefixer": "^10.4.20",
     "eslint": "^9.0.0",
     "eslint-config-next": "15.5.22",
+    "happy-dom": "^20.11.1",
     "postcss": "^8.5.25",
     "tailwindcss": "3.4.18",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.10"
   },
   "//overrides": "next 15.5 pins postcss to 8.4.31 and sharp to ^0.34.3 internally; both carry high-severity advisories that are only fixed in later minors. Drop these once next ships the bumps upstream.",
   "overrides": {

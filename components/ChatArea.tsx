@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/lib/chatStore';
+import { resumeResearchJob, ResearchBusyError } from '@/lib/researchJobs';
 import MessageBubble from './MessageBubble';
 import ChatInput from './ChatInput';
 
@@ -63,11 +64,32 @@ const STARTER_CARDS = [
 // ─── Chat Area ────────────────────────────────────────────────────────────────
 
 export default function ChatArea() {
-  const { state, activeSession, sendMessage, createSession, toggleSidebar } =
-    useChatStore();
-  const { isDark, isQuerying, isSidebarOpen } = state;
+  const {
+    state,
+    activeSession,
+    sendMessage,
+    createSession,
+    toggleSidebar,
+    isSessionQuerying,
+    runResearch,
+    answerWithoutResearch,
+    dismissResearch,
+    cancelResearch,
+  } = useChatStore();
+  const { isDark, isSidebarOpen } = state;
+  const isQuerying = isSessionQuerying(state.activeSessionId);
+  const activeJob = state.researchJobs.find(
+    j => j.sessionId === activeSession?.id &&
+         (j.status === 'QUEUED' || j.status === 'RUNNING')
+  );
   const bottomRef = useRef<HTMLDivElement>(null);
   const hasMessages = (activeSession?.messages.length ?? 0) > 0;
+
+  // Inline feedback for a "Check again" click that couldn't proceed — keyed
+  // by message id so only the bubble the user actually clicked shows it.
+  // No dialog: resumeResearchJob's mixed contract (false / throw / true)
+  // means both failure branches are realistic, not rare edge cases.
+  const [resumeNotice, setResumeNotice] = useState<{ messageId: string; text: string } | null>(null);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -113,23 +135,25 @@ export default function ChatArea() {
               {activeSession?.title ?? 'Legal AI Assistant'}
             </h1>
             <p className={`text-[11px] ${isDark ? 'text-white/40' : 'text-charcoal/38'}`}>
-              {isQuerying
-                ? 'Searching knowledge base…'
-                : activeSession
-                  ? `${activeSession.messageCount} message${activeSession.messageCount !== 1 ? 's' : ''}`
-                  : 'Perchstone & Graeys'
+              {activeJob
+                ? 'Researching…'
+                : isQuerying
+                  ? 'Searching knowledge base…'
+                  : activeSession
+                    ? `${activeSession.messageCount} message${activeSession.messageCount !== 1 ? 's' : ''}`
+                    : 'Perchstone & Graeys'
               }
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          {isQuerying && (
+          {(isQuerying || activeJob) && (
             <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium
               ${isDark ? 'bg-amber-400/10 text-amber-400' : 'bg-charcoal/8 text-charcoal/60'}`}
             >
               <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
-              Thinking
+              {activeJob ? 'Researching' : 'Thinking'}
             </div>
           )}
 
@@ -155,7 +179,64 @@ export default function ChatArea() {
         {hasMessages ? (
           <div className="px-4 py-6 space-y-6 max-w-3xl mx-auto">
             {activeSession!.messages.map(msg => (
-              <MessageBubble key={msg.id} message={msg} isDark={isDark} />
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                isDark={isDark}
+                researchJob={
+                  msg.researchJobId
+                    ? state.researchJobs.find(j => j.jobId === msg.researchJobId)
+                    : undefined
+                }
+                resumeNotice={resumeNotice?.messageId === msg.id ? resumeNotice.text : undefined}
+                onRunResearch={() =>
+                  msg.researchPrompt &&
+                  runResearch(activeSession!.id, msg.id, msg.researchPrompt.question)}
+                onAnswerNow={() =>
+                  msg.researchPrompt &&
+                  answerWithoutResearch(activeSession!.id, msg.id, msg.researchPrompt.question)}
+                onDismissResearch={() => dismissResearch(activeSession!.id, msg.id)}
+                onCancelResearch={() => {
+                  setResumeNotice(null);
+                  if (msg.researchJobId) cancelResearch(activeSession!.id, msg.id, msg.researchJobId);
+                }}
+                onResumeResearch={() => {
+                  if (!msg.researchJobId) return;
+                  setResumeNotice(null);
+                  try {
+                    const resumed = resumeResearchJob(msg.researchJobId);
+                    if (!resumed) {
+                      setResumeNotice({
+                        messageId: msg.id,
+                        text: 'This research job can no longer be resumed — it may have finished, failed, or been cancelled already.',
+                      });
+                    }
+                  } catch (error) {
+                    if (error instanceof ResearchBusyError) {
+                      setResumeNotice({
+                        messageId: msg.id,
+                        text: 'Another research job is already running in this session. Wait for it to finish before checking this one again.',
+                      });
+                    } else {
+                      // Genuinely unexpected — this repo has no error boundary
+                      // or window.onerror reporting, so log it explicitly
+                      // rather than let a rethrow vanish silently.
+                      console.error('Unexpected error resuming research job', error);
+                      setResumeNotice({
+                        messageId: msg.id,
+                        text: 'Something went wrong checking on this job. Please try again.',
+                      });
+                    }
+                  }
+                }}
+                onRetryResearch={() => {
+                  setResumeNotice(null);
+                  const job = msg.researchJobId
+                    ? state.researchJobs.find(j => j.jobId === msg.researchJobId)
+                    : undefined;
+                  if (job) runResearch(activeSession!.id, msg.id, job.question);
+                }}
+              />
             ))}
             <div ref={bottomRef} />
           </div>
