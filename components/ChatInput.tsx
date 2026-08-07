@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { useChatStore } from '@/lib/chatStore';
 import { documentSearch, listDocuments, DocumentSummary, SearchResult } from '@/lib/api';
+import { GEN_FORMATS, NATIVE_TEMPLATE_EXT } from '@/lib/documentFormats';
 
 // ─── Suggested prompts ────────────────────────────────────────────────────────
 
@@ -19,19 +20,6 @@ const SUGGESTIONS = [
   'What is the process for trademark registration?',
   'Summarise employee rights under the Labour Act',
 ];
-
-// ─── Document generation options ──────────────────────────────────────────────
-
-const GEN_FORMATS: Array<{ value: string | null; label: string }> = [
-  { value: null,   label: 'Auto' },
-  { value: 'docx', label: 'Word' },
-  { value: 'pdf',  label: 'PDF' },
-  { value: 'pptx', label: 'Slides' },
-  { value: 'xlsx', label: 'Sheet' },
-];
-
-// Only native Office formats can serve as house-style templates
-const NATIVE_TEMPLATE_EXT = /\.(docx|pptx|xlsx)$/i;
 
 // ─── Search results panel ─────────────────────────────────────────────────────
 
