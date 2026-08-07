@@ -374,15 +374,19 @@ const CHAR_DELAY = 6; // ms per tick — lower = faster
 // with length to keep any answer inside this budget.
 const MAX_TYPEWRITE_MS = 6_000;
 
-// ─── Faithful-render document prompt ──────────────────────────────────────────
+// ─── Rendering a finished answer into a document ──────────────────────────────
 //
-// /documents/generate always plans a document from `prompt` through its own
-// RAG pipeline — there is no "just render this" mode (see
-// docs/BACKEND_ASK-styled-document-from-content.md). Wrapping the finished
-// answer in an explicit reproduction instruction, rather than sending the
-// original question, gives the planner the real content to lay out instead of
-// re-deriving it — the planning system prompt already forbids inventing facts,
-// so an instruction to reproduce verbatim is the mechanism, not a workaround.
+// Preferred path: `content` mode on /documents/generate, which skips retrieval
+// and the model entirely and lays the supplied Markdown out as-is. The document
+// then IS the answer rather than a fresh derivation of it, and it accepts up to
+// 500,000 characters.
+//
+// Fallback: older deployments only accept `prompt` and plan the document
+// through their own RAG pipeline. Wrapping the finished answer in an explicit
+// reproduction instruction gives that planner the real content to lay out
+// instead of re-deriving it — the planning system prompt already forbids
+// inventing facts. Lower fidelity and a far tighter cap, so it is only used
+// when the backend rejects content mode.
 const FAITHFUL_RENDER_PREFIX = `Reproduce the following text faithfully as a formal document. It is a finished
 piece of work: do not summarise it, do not omit any part of it, do not add new
 facts, citations, authorities or commentary, and do not soften or restate its
@@ -393,14 +397,26 @@ well-structured document.
 ---
 `;
 
-// GenerationRequest.from_payload raises ValueError above this — enforced
-// server-side and non-negotiable. We check it client-side so an over-long
-// opinion gets a clear refusal instead of a wasted round trip (or, worse, a
-// silently truncated document).
+/** Content mode's ceiling. Enforced server-side; checked here to fail fast. */
+const DOCUMENT_CONTENT_CHAR_CAP = 500_000;
+
+/** Prompt mode's ceiling on older deployments. */
 const DOCUMENT_PROMPT_CHAR_CAP = 12_000;
 
 function buildFaithfulRenderPrompt(content: string): string {
   return `${FAITHFUL_RENDER_PREFIX}${content}`;
+}
+
+/**
+ * True when the backend rejected `content` because it predates content mode.
+ * That deployment demands `prompt`, so the caller can retry the older way.
+ */
+function isPreContentModeRejection(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.status === 400 &&
+    /required field:\s*prompt/i.test(String(error.message))
+  );
 }
 
 export function ChatProvider({ children }: { children: ReactNode }) {
@@ -946,9 +962,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         ?.messages.find(m => m.id === messageId);
       if (!message || !message.content) return;
 
-      const totalLength = FAITHFUL_RENDER_PREFIX.length + message.content.length;
-      if (totalLength > DOCUMENT_PROMPT_CHAR_CAP) {
-        const overBy = totalLength - DOCUMENT_PROMPT_CHAR_CAP;
+      const tooLong = (cap: number, used: number): string =>
+        `This answer is too long to render into a document — it is ` +
+        `${(used - cap).toLocaleString()} character${used - cap === 1 ? '' : 's'} over the ` +
+        `${cap.toLocaleString()}-character limit the document service accepts. Shortening ` +
+        `the answer isn't something we're willing to do silently, so this download can't ` +
+        `proceed as-is.`;
+
+      if (message.content.length > DOCUMENT_CONTENT_CHAR_CAP) {
         dispatch({
           type: 'PATCH_MESSAGE',
           payload: {
@@ -956,12 +977,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             messageId,
             patch: {
               isGeneratingArtifact: false,
-              artifactError:
-                `This answer is too long to render into a document — it is ` +
-                `${overBy.toLocaleString()} character${overBy === 1 ? '' : 's'} over the ` +
-                `${DOCUMENT_PROMPT_CHAR_CAP.toLocaleString()}-character limit the document service ` +
-                `accepts. Shortening the answer isn't something we're willing to do silently, so ` +
-                `this download can't proceed as-is.`,
+              artifactError: tooLong(DOCUMENT_CONTENT_CHAR_CAP, message.content.length),
             },
           },
         });
@@ -977,14 +993,43 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         },
       });
 
+      const shared = {
+        sessionId,
+        ...(opts.format ? { format: opts.format } : {}),
+        ...(opts.referenceDocumentId ? { referenceDocumentId: opts.referenceDocumentId } : {}),
+      };
+
       try {
-        const resp = await generateDocument({
-          prompt: buildFaithfulRenderPrompt(message.content),
-          sessionId,
-          topK: 1,
-          ...(opts.format ? { format: opts.format } : {}),
-          ...(opts.referenceDocumentId ? { referenceDocumentId: opts.referenceDocumentId } : {}),
-        });
+        let resp;
+        try {
+          // Content mode: the document is the answer, laid out as-is.
+          resp = await generateDocument({ ...shared, content: message.content });
+        } catch (error: unknown) {
+          if (!isPreContentModeRejection(error)) throw error;
+
+          // Older deployment — only `prompt` is accepted, and its cap is far
+          // tighter, so an answer that fits content mode may not fit this.
+          const promptLength = FAITHFUL_RENDER_PREFIX.length + message.content.length;
+          if (promptLength > DOCUMENT_PROMPT_CHAR_CAP) {
+            dispatch({
+              type: 'PATCH_MESSAGE',
+              payload: {
+                sessionId,
+                messageId,
+                patch: {
+                  isGeneratingArtifact: false,
+                  artifactError: tooLong(DOCUMENT_PROMPT_CHAR_CAP, promptLength),
+                },
+              },
+            });
+            return;
+          }
+          resp = await generateDocument({
+            ...shared,
+            prompt: buildFaithfulRenderPrompt(message.content),
+            topK: 1,
+          });
+        }
         dispatch({
           type: 'PATCH_MESSAGE',
           payload: {
