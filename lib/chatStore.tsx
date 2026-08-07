@@ -647,7 +647,21 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       });
       dispatch({ type: 'SET_QUERYING', payload: { sessionId, value: true } });
       try {
-        const resp = await chatQuery({ question, sessionId, autoResearch: false });
+        // Mirror sendMessage's own follow-up rule (prior messageCount > 1),
+        // adjusted for timing: by the time this runs, the question and its
+        // placeholder are already in the session, so the placeholder's own
+        // position stands in for the messageCount sendMessage would have
+        // seen before adding this exchange.
+        const messages = state.sessions.find(s => s.id === sessionId)?.messages ?? [];
+        const messageIndex = messages.findIndex(m => m.id === messageId);
+        const isFollowUp = messageIndex > 2;
+
+        const resp = await chatQuery({
+          question,
+          sessionId,
+          autoResearch: false,
+          ...(isFollowUp ? { useHistory: true } : {}),
+        });
         dispatch({ type: 'SET_QUERYING', payload: { sessionId, value: false } });
         typewrite(sessionId, messageId, resp.answer, () => {
           dispatch({
@@ -678,7 +692,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         });
       }
     },
-    [typewrite]
+    [state.sessions, typewrite]
   );
 
   const dismissResearch = useCallback((sessionId: string, messageId: string) => {
@@ -686,7 +700,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       type: 'PATCH_MESSAGE',
       payload: {
         sessionId, messageId,
-        patch: { researchPrompt: undefined, isStreaming: false, content: '_Deep research not run._' },
+        patch: { researchPrompt: undefined, isStreaming: false, content: '*Deep research not run.*' },
       },
     });
   }, []);

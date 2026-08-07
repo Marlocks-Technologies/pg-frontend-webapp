@@ -46,7 +46,7 @@ export function ResearchConsent({
 
       <p className={`text-[12.5px] leading-relaxed ${isDark ? 'text-white/50' : 'text-charcoal/55'}`}>
         {configured === false
-          ? 'Deep research is not configured for this deployment.'
+          ? "Deep research isn't available right now."
           : body}
       </p>
 
@@ -57,7 +57,7 @@ export function ResearchConsent({
       )}
 
       <div className="flex items-center gap-2 mt-3 flex-wrap">
-        {configured !== false && (
+        {configured === true && (
           <button
             onClick={onRun}
             className={`px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all duration-200 active:scale-95
@@ -65,6 +65,12 @@ export function ResearchConsent({
           >
             Run deep research
           </button>
+        )}
+
+        {configured === null && (
+          <span className={`px-2 py-1.5 text-[12px] ${isDark ? 'text-white/35' : 'text-charcoal/35'}`}>
+            Checking availability…
+          </span>
         )}
 
         {canAnswerNow && (
