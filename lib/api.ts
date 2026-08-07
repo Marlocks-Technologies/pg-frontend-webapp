@@ -259,6 +259,14 @@ export interface LegalResearchRequest {
   sessionId?: string;
   topK?: number;            // server clamps to 1..12
   filters?: Record<string, string>;
+  /**
+   * A previously uploaded document whose structure should shape how the opinion
+   * is written — section order, heading names, how authorities and assumptions
+   * are presented. The backend extracts those conventions and folds them into
+   * the drafting pass, so the opinion arrives in house form and content mode can
+   * render it without any rewrite. Ignored by deployments that predate it.
+   */
+  referenceDocumentId?: string;
 }
 
 export async function startLegalResearch(
