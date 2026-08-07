@@ -10,7 +10,7 @@ interface Toast { jobId: string; sessionId: string; title: string }
 
 export default function ResearchToast() {
   const { state, switchSession } = useChatStore();
-  const { researchJobs, activeSessionId, sessions, isDark } = state;
+  const { researchJobs, activeSessionId, sessions, isDark, isSidebarOpen } = state;
 
   const [toast, setToast] = useState<Toast | null>(null);
   const announced = useRef(new Set<string>());
@@ -54,6 +54,7 @@ export default function ResearchToast() {
       role="status"
       aria-live="polite"
       className={`pg-toast-in absolute bottom-28 right-5 z-30 w-[280px] p-3.5 rounded-xl border shadow-lg
+        ${isSidebarOpen ? 'max-lg:hidden' : ''}
         ${isDark ? 'bg-[#1c1c1e] border-white/12' : 'bg-white border-charcoal/12'}`}
     >
       <p className={`flex items-center gap-2 text-[12.5px] font-semibold
