@@ -161,7 +161,7 @@ type Action =
   | { type: 'SET_QUERYING'; payload: { sessionId: string; value: boolean } }
   | { type: 'LOAD_HISTORY'; payload: { sessionId: string; messages: Message[] } }
   | { type: 'DELETE_SESSION'; payload: string }
-  | { type: 'SET_RESEARCH_JOBS'; payload: ResearchJobRecord[] };
+  | { type: 'RECONCILE_RESEARCH_JOBS'; payload: ResearchJobRecord[] };
 
 function reducer(state: ChatState, action: Action): ChatState {
   switch (action.type) {
@@ -175,8 +175,53 @@ function reducer(state: ChatState, action: Action): ChatState {
         isHydrated: true,
       };
 
-    case 'SET_RESEARCH_JOBS':
-      return { ...state, researchJobs: action.payload };
+    // The registry is the source of truth for which jobs are actually live.
+    // Every route that can make a message's researchJobId dangle — orphan
+    // eviction, 7-day expiry, a cross-tab cancel/delete, a resume that finds
+    // nothing to resume — funnels through the same 'changed' event that
+    // carries this list. Reconciling here, in one place, closes all of them
+    // at once instead of chasing each route's own termination path.
+    case 'RECONCILE_RESEARCH_JOBS': {
+      const liveIds = new Set(action.payload.map(j => j.jobId));
+      let changed = false;
+      const sessions = state.sessions.map(s => {
+        let sessionChanged = false;
+        const messages = s.messages.map(m => {
+          // Only reap a message that is still silently waiting (no content
+          // yet) on a job the registry no longer has. Deliberately NOT
+          // gated on m.isStreaming: serialiseSession forces isStreaming to
+          // false on every save so a reload never freezes on a stale
+          // spinner, which means a second tab hydrating from localStorage
+          // sees isStreaming: false on a message that is, in every way that
+          // matters, still waiting — the empty content plus a still-set
+          // researchJobId are the only signals that survive a fresh
+          // cross-tab hydration. A message that already has content — a
+          // completed answer whose record was later reaped by
+          // markResearchSeen, for instance — is correct as it stands and
+          // must not be overwritten.
+          if (m.researchJobId && !liveIds.has(m.researchJobId) && !m.content) {
+            sessionChanged = true;
+            return {
+              ...m,
+              researchJobId: undefined,
+              isStreaming: false,
+              // Deliberately neutral: this same path covers cancellation
+              // from another tab, expiry, and eviction alike, and the store
+              // has no way to tell which one happened.
+              content: '*Research ended.*',
+            };
+          }
+          return m;
+        });
+        if (sessionChanged) { changed = true; return { ...s, messages }; }
+        return s;
+      });
+      return {
+        ...state,
+        researchJobs: action.payload,
+        sessions: changed ? sessions : state.sessions,
+      };
+    }
 
     case 'TOGGLE_DARK':
       return { ...state, isDark: !state.isDark };
@@ -477,7 +522,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     sessionIds,
     onEvent: useCallback((event: ResearchEvent) => {
       if (event.kind === 'changed') {
-        dispatch({ type: 'SET_RESEARCH_JOBS', payload: event.jobs });
+        dispatch({ type: 'RECONCILE_RESEARCH_JOBS', payload: event.jobs });
         return;
       }
       const { job, result } = event;
