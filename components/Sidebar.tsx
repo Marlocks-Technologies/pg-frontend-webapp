@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import React from 'react';
 import { useChatStore, Session } from '@/lib/chatStore';
+import { type ResearchJobRecord } from '@/lib/researchJobs';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -26,12 +27,14 @@ function SessionRow({
   isDark,
   onSelect,
   onDelete,
+  researchJob,
 }: {
   session: Session;
   isActive: boolean;
   isDark: boolean;
   onSelect: () => void;
   onDelete: (e: React.MouseEvent) => void;
+  researchJob?: ResearchJobRecord;
 }) {
   const [hovered, setHovered] = useState(false);
 
@@ -56,13 +59,22 @@ function SessionRow({
       `}
     >
       <div className="flex items-start gap-2.5 pr-6">
-        {/* Icon dot */}
-        <span className={`mt-[7px] shrink-0 w-1.5 h-1.5 rounded-full
-          ${isActive
-            ? 'bg-amber-400'
-            : isDark ? 'bg-white/15' : 'bg-charcoal/18'
-          }`}
-        />
+        {/* Icon dot — doubles as the research indicator */}
+        {researchJob && (researchJob.status === 'QUEUED' || researchJob.status === 'RUNNING') ? (
+          <span
+            title="Deep research running"
+            className="mt-[7px] shrink-0 w-1.5 h-1.5 rounded-full pg-pulse bg-amber-400"
+          />
+        ) : researchJob && researchJob.status === 'COMPLETED' && !researchJob.seen ? (
+          <span
+            title="Research ready"
+            className="mt-[7px] shrink-0 w-1.5 h-1.5 rounded-full bg-amber-400"
+          />
+        ) : (
+          <span className={`mt-[7px] shrink-0 w-1.5 h-1.5 rounded-full
+            ${isActive ? 'bg-amber-400' : isDark ? 'bg-white/15' : 'bg-charcoal/18'}`}
+          />
+        )}
 
         <div className="flex-1 min-w-0">
           <p className={`text-[13px] font-medium truncate leading-snug
@@ -77,6 +89,12 @@ function SessionRow({
             {relativeTime(session.lastMessageAt)}
             {session.messageCount > 0 && (
               <span className="ml-1.5 opacity-60">· {session.messageCount}</span>
+            )}
+            {researchJob && (researchJob.status === 'QUEUED' || researchJob.status === 'RUNNING') && (
+              <span className="ml-1.5 opacity-70">· Researching</span>
+            )}
+            {researchJob && researchJob.status === 'COMPLETED' && !researchJob.seen && (
+              <span className="ml-1.5 opacity-70">· Ready</span>
             )}
           </p>
         </div>
@@ -289,6 +307,9 @@ export default function Sidebar({
                   e.stopPropagation();
                   deleteSession(session.id);
                 }}
+                researchJob={state.researchJobs
+                  .filter(j => j.sessionId === session.id)
+                  .sort((a, b) => b.startedAt - a.startedAt)[0]}
               />
             ))
           )}

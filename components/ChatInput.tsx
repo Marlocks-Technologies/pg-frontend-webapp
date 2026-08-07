@@ -128,13 +128,16 @@ function SearchPanel({
 // ─── Chat Input ───────────────────────────────────────────────────────────────
 
 export default function ChatInput() {
-  const { state, sendMessage } = useChatStore();
-  const { isDark, isQuerying } = state;
+  const { state, sendMessage, startResearch, isSessionQuerying } = useChatStore();
+  const { isDark } = state;
+  const isQuerying = isSessionQuerying(state.activeSessionId);
 
   const [value, setValue] = useState('');
   const [isSearchMode, setIsSearchMode] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+
+  const [isResearchMode, setIsResearchMode] = useState(false);
 
   const [isGenerateMode, setIsGenerateMode] = useState(false);
   const [genFormat, setGenFormat] = useState<string | null>(null); // null = Auto
@@ -149,6 +152,7 @@ export default function ChatInput() {
       const next = !v;
       if (next) {
         setIsSearchMode(false);
+        setIsResearchMode(false);
         setSearchResults(null);
         if (refDocs === null && !refDocsFailed) {
           listDocuments()
@@ -186,6 +190,12 @@ export default function ChatInput() {
       } finally {
         setIsSearching(false);
       }
+    } else if (isResearchMode) {
+      if (isQuerying) return;
+      await startResearch(q);
+      setValue('');
+      setIsResearchMode(false);
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
     } else {
       if (isQuerying) return;
       await sendMessage(
@@ -278,7 +288,7 @@ export default function ChatInput() {
       )}
 
       {/* Suggested prompts (only when input empty + not searching/generating) */}
-      {!value && !searchResults && !isSearching && !isGenerateMode && (
+      {!value && !searchResults && !isSearching && !isGenerateMode && !isResearchMode && (
         <div className="flex gap-2 mb-3 flex-wrap">
           {SUGGESTIONS.map((s, i) => (
             <button
@@ -323,6 +333,7 @@ export default function ChatInput() {
           onClick={() => {
             setIsSearchMode(v => !v);
             setIsGenerateMode(false);
+            setIsResearchMode(false);
             setSearchResults(null);
           }}
           title={isSearchMode ? 'Switch to chat' : 'Search documents'}
@@ -361,6 +372,28 @@ export default function ChatInput() {
           </svg>
         </button>
 
+        {/* Research toggle */}
+        <button
+          onClick={() => {
+            setIsResearchMode(v => !v);
+            setIsSearchMode(false);
+            setIsGenerateMode(false);
+            setSearchResults(null);
+          }}
+          title={isResearchMode ? 'Switch to chat' : 'Deep legal research'}
+          className={`shrink-0 mb-0.5 p-2 rounded-xl transition-all duration-150 active:scale-90
+            ${isResearchMode
+              ? isDark ? 'bg-white/12 text-white/85' : 'bg-charcoal/10 text-charcoal'
+              : isDark
+                ? 'text-white/35 hover:text-white/70 hover:bg-white/6'
+                : 'text-charcoal/28 hover:text-charcoal/60 hover:bg-charcoal/5'
+            }`}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 3v18M5 7h14M7 7l-3 6a3 3 0 0 0 6 0zM17 7l3 6a3 3 0 0 1-6 0z"/>
+          </svg>
+        </button>
+
         {/* Textarea */}
         <textarea
           ref={textareaRef}
@@ -373,7 +406,9 @@ export default function ChatInput() {
               ? 'Search the document knowledge base…'
               : isGenerateMode
                 ? 'Describe the document to generate…'
-                : 'Ask a legal question…'
+                : isResearchMode
+                  ? 'Ask for a verified legal opinion…'
+                  : 'Ask a legal question…'
           }
           rows={1}
           className={`
@@ -385,11 +420,11 @@ export default function ChatInput() {
         />
 
         {/* Mode label */}
-        {(isSearchMode || isGenerateMode) && (
+        {(isSearchMode || isGenerateMode || isResearchMode) && (
           <span className={`pg-pop shrink-0 mb-1 text-[10px] font-bold tracking-widest uppercase
             ${isDark ? 'text-white/45' : 'text-charcoal/40'}`}
           >
-            {isSearchMode ? 'SEARCH' : 'GENERATE'}
+            {isSearchMode ? 'SEARCH' : isGenerateMode ? 'GENERATE' : 'RESEARCH'}
           </span>
         )}
 
