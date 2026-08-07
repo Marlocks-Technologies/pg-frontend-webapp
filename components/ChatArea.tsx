@@ -183,6 +183,7 @@ export default function ChatArea() {
                 key={msg.id}
                 message={msg}
                 isDark={isDark}
+                sessionId={activeSession!.id}
                 researchJob={
                   msg.researchJobId
                     ? state.researchJobs.find(j => j.jobId === msg.researchJobId)

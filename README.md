@@ -35,7 +35,7 @@ npm run dev
 |---|---|
 | `NEXT_PUBLIC_API_BASE_URL` | Base URL for the RAG API Gateway (no trailing slash) |
 | `NEXT_PUBLIC_DOCUMENT_BASE_URL` | Optional document API base URL; defaults to `NEXT_PUBLIC_API_BASE_URL` |
-| `RESEARCH_API_KEY` | **Server-only.** API key for the deep legal-research endpoints. Unset ⇒ deep research returns 503; ordinary chat is unaffected |
+| `RAG_RESEARCH_API_KEY` | **Server-only — never `NEXT_PUBLIC_*`.** API key for the deep legal-research endpoints. Unset ⇒ deep research returns 503; ordinary chat is unaffected. The older name `RESEARCH_API_KEY` is still read as a fallback |
 | `RESEARCH_API_BASE_URL` | Optional backend for the research proxy; falls back to `API_PROXY_TARGET`, then prod |
 
 ---
@@ -48,7 +48,7 @@ npm run dev
 | `POST` | `/chat/query` | Send a question, receive an AI answer with citations |
 | `POST` | `/chat/research` | Queue a verified Nigerian legal opinion (via `/api/research`) |
 | `GET` | `/chat/research/:jobId` | Poll a research job (via `/api/research/:jobId`) |
-| `GET` | `/api/research/status` | Whether `RESEARCH_API_KEY` is set (boolean only) |
+| `GET` | `/api/research/status` | Whether `RAG_RESEARCH_API_KEY` is set (boolean only) |
 | `GET` | `/chat/history/:sessionId` | Load existing conversation history |
 | `DELETE` | `/chat/session/:sessionId` | Delete a stored conversation |
 | `POST` | `/chat/search` | Semantic search across documents (no AI answer) |
@@ -76,7 +76,7 @@ opinion along with the web authorities the backend actually audited.
 Those two endpoints sit behind an API-key usage plan, since each job spends money
 on AgentCore web search. The key must never reach the browser, so requests go
 through this app's own route handlers — `app/api/research/*` — which attach
-`RESEARCH_API_KEY` server-side. `GET /api/research/status` reports only whether
+`RAG_RESEARCH_API_KEY` server-side. `GET /api/research/status` reports only whether
 the key is configured (a boolean, never the key itself), so the UI can avoid
 offering a Run button that would just 503.
 

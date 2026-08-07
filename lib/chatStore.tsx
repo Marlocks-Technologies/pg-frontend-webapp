@@ -13,6 +13,7 @@ import {
 import {
   ApiError,
   chatQuery,
+  generateDocument,
   getChatHistory,
   Citation,
   GeneratedArtifact,
@@ -39,6 +40,10 @@ export interface Message {
   timestamp: Date;
   citations?: Citation[];
   artifact?: GeneratedArtifact;
+  /** Set if the post-answer document generation call failed; the answer text stands regardless. */
+  artifactError?: string;
+  /** True while downloadAnswerAsDocument's generateDocument call is in flight. */
+  isGeneratingArtifact?: boolean;
   isStreaming?: boolean;
   isError?: boolean;
   chunksRetrieved?: number;
@@ -53,6 +58,14 @@ export interface Message {
   researchJobId?: string;
   /** Present while the user is being asked whether to run deep research. */
   researchPrompt?: { question: string; canAnswerNow: boolean };
+  /**
+   * The format/style the user asked for in Generate mode when the request
+   * turned out to need research instead. Carried through the research job
+   * so the completed opinion can at least say what styled download was
+   * wanted — the render itself is blocked on a backend change (see
+   * docs/BACKEND_ASK-styled-document-from-content.md).
+   */
+  pendingGenerate?: GenerateDocumentOptions;
 }
 
 export interface Session {
@@ -78,6 +91,7 @@ function serialiseSession(s: Session): unknown {
       // Never persist in-flight state
       isStreaming: false,
       researchStatus: undefined,
+      isGeneratingArtifact: false,
     })),
   };
 }
@@ -345,6 +359,11 @@ interface ChatContextValue {
   answerWithoutResearch: (sessionId: string, messageId: string, question: string) => Promise<void>;
   dismissResearch: (sessionId: string, messageId: string) => void;
   cancelResearch: (sessionId: string, messageId: string, jobId: string) => void;
+  downloadAnswerAsDocument: (
+    sessionId: string,
+    messageId: string,
+    opts: { format?: string; referenceDocumentId?: string }
+  ) => Promise<void>;
 }
 
 const Ctx = createContext<ChatContextValue | null>(null);
@@ -354,6 +373,51 @@ const CHAR_DELAY = 6; // ms per tick — lower = faster
 // 3-char step that would take most of a minute to reveal, so the step scales
 // with length to keep any answer inside this budget.
 const MAX_TYPEWRITE_MS = 6_000;
+
+// ─── Rendering a finished answer into a document ──────────────────────────────
+//
+// Preferred path: `content` mode on /documents/generate, which skips retrieval
+// and the model entirely and lays the supplied Markdown out as-is. The document
+// then IS the answer rather than a fresh derivation of it, and it accepts up to
+// 500,000 characters.
+//
+// Fallback: older deployments only accept `prompt` and plan the document
+// through their own RAG pipeline. Wrapping the finished answer in an explicit
+// reproduction instruction gives that planner the real content to lay out
+// instead of re-deriving it — the planning system prompt already forbids
+// inventing facts. Lower fidelity and a far tighter cap, so it is only used
+// when the backend rejects content mode.
+const FAITHFUL_RENDER_PREFIX = `Reproduce the following text faithfully as a formal document. It is a finished
+piece of work: do not summarise it, do not omit any part of it, do not add new
+facts, citations, authorities or commentary, and do not soften or restate its
+conclusions. Preserve every heading, citation, case name, statutory reference
+and quotation exactly as written. Your only job is to lay this content out as a
+well-structured document.
+
+---
+`;
+
+/** Content mode's ceiling. Enforced server-side; checked here to fail fast. */
+const DOCUMENT_CONTENT_CHAR_CAP = 500_000;
+
+/** Prompt mode's ceiling on older deployments. */
+const DOCUMENT_PROMPT_CHAR_CAP = 12_000;
+
+function buildFaithfulRenderPrompt(content: string): string {
+  return `${FAITHFUL_RENDER_PREFIX}${content}`;
+}
+
+/**
+ * True when the backend rejected `content` because it predates content mode.
+ * That deployment demands `prompt`, so the caller can retry the older way.
+ */
+function isPreContentModeRejection(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.status === 400 &&
+    /required field:\s*prompt/i.test(String(error.message))
+  );
+}
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, {
@@ -598,14 +662,31 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
       dispatch({ type: 'SET_QUERYING', payload: { sessionId, value: true } });
 
+      // Generate mode never sends generateDocument on this first call. The
+      // backend's own precedence bug makes explicit_generation win over
+      // advanced_research unconditionally, so a request carrying
+      // generateDocument can never get the 409 that routes an authority-heavy
+      // prompt to async research — it just runs synchronous RAG generation
+      // until API Gateway's 29s ceiling kills it. Splitting into two calls
+      // lets the backend's research heuristic run first, on a request it can
+      // actually 409 on. See docs/BACKEND_ASK-styled-document-from-content.md.
+      const generateOptions = options?.generateDocument;
+
       try {
         const isFollowUp = (state.sessions.find(s => s.id === sessionId)?.messageCount ?? 0) > 1;
-        const resp = await chatQuery({
-          question,
-          sessionId,
-          ...(isFollowUp ? { useHistory: true } : {}),
-          ...(options?.generateDocument ? { generateDocument: options.generateDocument } : {}),
-        });
+        const useHistory = isFollowUp ? { useHistory: true } : {};
+
+        const resp = generateOptions
+          ? question.length > 1000
+            // Over the sync cap even with generation off — force research
+            // explicitly rather than let the cap reject it as too long.
+            ? await chatQuery({ question, sessionId, research: true, ...useHistory })
+            // Under the cap — ask normally, with the backend's own
+            // auto-generation suppressed, so a plain 409/200 answer comes
+            // back and we attach the styled document ourselves afterwards.
+            : await chatQuery({ question, sessionId, autoGenerateDocument: false, ...useHistory })
+          : await chatQuery({ question, sessionId, ...useHistory });
+
         dispatch({ type: 'SET_QUERYING', payload: { sessionId, value: false } });
 
         typewrite(sessionId, placeholderId, resp.answer, () => {
@@ -624,6 +705,41 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             },
           });
         });
+
+        // The answer came back synchronously and the user asked for a
+        // styled document — fetch it as a second call, independent of the
+        // typewriter animation, and attach it to the same message when it
+        // resolves. A failure here must not touch the answer already shown.
+        if (generateOptions) {
+          try {
+            const genResp = await generateDocument({
+              prompt: question,
+              sessionId: sessionId!,
+              ...generateOptions,
+            });
+            dispatch({
+              type: 'PATCH_MESSAGE',
+              payload: {
+                sessionId: sessionId!,
+                messageId: placeholderId,
+                patch: { artifact: genResp.artifact },
+              },
+            });
+          } catch (genErr: unknown) {
+            dispatch({
+              type: 'PATCH_MESSAGE',
+              payload: {
+                sessionId: sessionId!,
+                messageId: placeholderId,
+                patch: {
+                  artifactError: genErr instanceof Error
+                    ? genErr.message
+                    : 'Document generation failed.',
+                },
+              },
+            });
+          }
+        }
       } catch (err: unknown) {
         // Authority-heavy question — hand off to the persistent registry so
         // the job survives even if this tab reloads.
@@ -636,6 +752,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               patch: {
                 isStreaming: false,
                 researchPrompt: { question, canAnswerNow: question.length <= 1000 },
+                ...(generateOptions ? { pendingGenerate: generateOptions } : {}),
               },
             },
           });
@@ -738,7 +855,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     async (sessionId: string, messageId: string, question: string) => {
       dispatch({
         type: 'PATCH_MESSAGE',
-        payload: { sessionId, messageId, patch: { researchPrompt: undefined, isStreaming: true } },
+        payload: {
+          sessionId, messageId,
+          // pendingGenerate cleared: this answer skips research entirely, so
+          // there is no completed opinion for a styled download to attach to.
+          patch: { researchPrompt: undefined, pendingGenerate: undefined, isStreaming: true },
+        },
       });
       dispatch({ type: 'SET_QUERYING', payload: { sessionId, value: true } });
       try {
@@ -795,7 +917,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       type: 'PATCH_MESSAGE',
       payload: {
         sessionId, messageId,
-        patch: { researchPrompt: undefined, isStreaming: false, content: '*Deep research not run.*' },
+        // pendingGenerate cleared: research was declined outright, so there
+        // is no completed opinion for a styled download to attach to.
+        patch: {
+          researchPrompt: undefined, pendingGenerate: undefined,
+          isStreaming: false, content: '*Deep research not run.*',
+        },
       },
     });
   }, []);
@@ -810,10 +937,123 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       type: 'PATCH_MESSAGE',
       payload: {
         sessionId, messageId,
-        patch: { researchJobId: undefined, isStreaming: false, content: '*Research cancelled.*' },
+        // pendingGenerate cleared: the job was cancelled before producing an
+        // opinion, so there is nothing for a styled download to attach to.
+        patch: {
+          researchJobId: undefined, pendingGenerate: undefined,
+          isStreaming: false, content: '*Research cancelled.*',
+        },
       },
     });
   }, []);
+
+  // ── Render an existing answer into a styled document ──────────────────────
+  // Works for any completed answer — ordinary chat or a verified research
+  // opinion. The answer's own `content` is the source of truth; we never
+  // re-derive it from the original question.
+  const downloadAnswerAsDocument = useCallback(
+    async (
+      sessionId: string,
+      messageId: string,
+      opts: { format?: string; referenceDocumentId?: string }
+    ) => {
+      const message = state.sessions
+        .find(s => s.id === sessionId)
+        ?.messages.find(m => m.id === messageId);
+      if (!message || !message.content) return;
+
+      const tooLong = (cap: number, used: number): string =>
+        `This answer is too long to render into a document — it is ` +
+        `${(used - cap).toLocaleString()} character${used - cap === 1 ? '' : 's'} over the ` +
+        `${cap.toLocaleString()}-character limit the document service accepts. Shortening ` +
+        `the answer isn't something we're willing to do silently, so this download can't ` +
+        `proceed as-is.`;
+
+      if (message.content.length > DOCUMENT_CONTENT_CHAR_CAP) {
+        dispatch({
+          type: 'PATCH_MESSAGE',
+          payload: {
+            sessionId,
+            messageId,
+            patch: {
+              isGeneratingArtifact: false,
+              artifactError: tooLong(DOCUMENT_CONTENT_CHAR_CAP, message.content.length),
+            },
+          },
+        });
+        return;
+      }
+
+      dispatch({
+        type: 'PATCH_MESSAGE',
+        payload: {
+          sessionId,
+          messageId,
+          patch: { isGeneratingArtifact: true, artifactError: undefined },
+        },
+      });
+
+      const shared = {
+        sessionId,
+        ...(opts.format ? { format: opts.format } : {}),
+        ...(opts.referenceDocumentId ? { referenceDocumentId: opts.referenceDocumentId } : {}),
+      };
+
+      try {
+        let resp;
+        try {
+          // Content mode: the document is the answer, laid out as-is.
+          resp = await generateDocument({ ...shared, content: message.content });
+        } catch (error: unknown) {
+          if (!isPreContentModeRejection(error)) throw error;
+
+          // Older deployment — only `prompt` is accepted, and its cap is far
+          // tighter, so an answer that fits content mode may not fit this.
+          const promptLength = FAITHFUL_RENDER_PREFIX.length + message.content.length;
+          if (promptLength > DOCUMENT_PROMPT_CHAR_CAP) {
+            dispatch({
+              type: 'PATCH_MESSAGE',
+              payload: {
+                sessionId,
+                messageId,
+                patch: {
+                  isGeneratingArtifact: false,
+                  artifactError: tooLong(DOCUMENT_PROMPT_CHAR_CAP, promptLength),
+                },
+              },
+            });
+            return;
+          }
+          resp = await generateDocument({
+            ...shared,
+            prompt: buildFaithfulRenderPrompt(message.content),
+            topK: 1,
+          });
+        }
+        dispatch({
+          type: 'PATCH_MESSAGE',
+          payload: {
+            sessionId,
+            messageId,
+            patch: { artifact: resp.artifact, isGeneratingArtifact: false, artifactError: undefined },
+          },
+        });
+      } catch (error: unknown) {
+        dispatch({
+          type: 'PATCH_MESSAGE',
+          payload: {
+            sessionId,
+            messageId,
+            patch: {
+              isGeneratingArtifact: false,
+              artifactError: error instanceof Error ? error.message : 'Document generation failed.',
+            },
+          },
+        });
+      }
+    },
+    [state.sessions]
+  );
 
   const toggleDark    = useCallback(() => dispatch({ type: 'TOGGLE_DARK' }), []);
   const toggleSidebar = useCallback(() => dispatch({ type: 'TOGGLE_SIDEBAR' }), []);
@@ -825,7 +1065,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <Ctx.Provider value={{ state, activeSession, sendMessage, createSession, switchSession, deleteSession, toggleDark, toggleSidebar, setSidebar, isSessionQuerying, runResearch, startResearch, answerWithoutResearch, dismissResearch, cancelResearch }}>
+    <Ctx.Provider value={{ state, activeSession, sendMessage, createSession, switchSession, deleteSession, toggleDark, toggleSidebar, setSidebar, isSessionQuerying, runResearch, startResearch, answerWithoutResearch, dismissResearch, cancelResearch, downloadAnswerAsDocument }}>
       {children}
     </Ctx.Provider>
   );

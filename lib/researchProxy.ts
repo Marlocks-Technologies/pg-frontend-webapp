@@ -18,16 +18,21 @@ export function researchBackendUrl(path: string): string {
   return `${base}${path}`;
 }
 
+/**
+ * RAG_RESEARCH_API_KEY is the current name, matching the dedicated frontend BFF
+ * key provisioned in AWS. RESEARCH_API_KEY is still read so a deployment that
+ * set the older name keeps working; drop it once every environment has moved.
+ */
 export function researchApiKey(): string | undefined {
-  return process.env.RESEARCH_API_KEY;
+  return process.env.RAG_RESEARCH_API_KEY || process.env.RESEARCH_API_KEY;
 }
 
 export function missingKeyResponse(): Response {
   return Response.json(
     {
       error:
-        'Legal research is not configured for this deployment. Set RESEARCH_API_KEY ' +
-        'in the server environment.',
+        'Legal research is not configured for this deployment. Set ' +
+        'RAG_RESEARCH_API_KEY in the server environment.',
     },
     { status: 503 }
   );

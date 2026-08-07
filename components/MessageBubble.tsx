@@ -1,8 +1,16 @@
 'use client';
 
-import { useState } from 'react';
-import { Message } from '@/lib/chatStore';
-import { Citation, GeneratedArtifact, WebSource, artifactDownloadUrl } from '@/lib/api';
+import { useEffect, useState } from 'react';
+import { Message, useChatStore } from '@/lib/chatStore';
+import {
+  Citation,
+  DocumentSummary,
+  GeneratedArtifact,
+  WebSource,
+  artifactDownloadUrl,
+  listDocuments,
+} from '@/lib/api';
+import { GEN_FORMATS, NATIVE_TEMPLATE_EXT } from '@/lib/documentFormats';
 import { type ResearchJobRecord } from '@/lib/researchJobs';
 import MarkdownMessage from './MarkdownMessage';
 import { ResearchConsent, ResearchProgress } from './ResearchCard';
@@ -74,6 +82,159 @@ function ArtifactCard({ artifact, isDark }: { artifact: GeneratedArtifact; isDar
         </svg>
         Download
       </a>
+    </div>
+  );
+}
+
+// ─── Download-as-document control ─────────────────────────────────────────────
+//
+// Sits under any completed answer — ordinary chat or a verified research
+// opinion — that has no artifact yet. Renders the answer's own text into a
+// Word/PDF/Slides/Sheet document, optionally styled after a previously
+// uploaded reference document. See lib/chatStore.tsx's
+// downloadAnswerAsDocument for the request itself (and the 12,000-character
+// guard) and docs/BACKEND_ASK-styled-document-from-content.md for why the
+// prompt has to be wrapped in a faithful-reproduction instruction rather than
+// hitting a dedicated "render this" endpoint.
+
+function DownloadAnswerControl({
+  message, isDark, sessionId,
+}: {
+  message: Message;
+  isDark: boolean;
+  sessionId: string;
+}) {
+  const { downloadAnswerAsDocument } = useChatStore();
+  const pending = message.pendingGenerate;
+
+  // A research answer that already carries a format/style the user picked
+  // before the question routed to research opens pre-selected and expanded —
+  // that choice was already made once and shouldn't need repeating. Any other
+  // completed answer starts collapsed, like the citations/authorities panels.
+  const [open, setOpen] = useState(!!pending);
+  const [format, setFormat] = useState<string | null>(pending?.format ?? null);
+  const [refDocId, setRefDocId] = useState<string | null>(pending?.referenceDocumentId ?? null);
+  const [refDocs, setRefDocs] = useState<DocumentSummary[] | null>(null);
+  const [refDocsFailed, setRefDocsFailed] = useState(false);
+
+  const busy = !!message.isGeneratingArtifact;
+
+  // Lazy-load style references the first time the panel is open — including
+  // immediately, for the pre-expanded pendingGenerate case.
+  useEffect(() => {
+    if (!open || refDocs !== null || refDocsFailed) return;
+    listDocuments()
+      .then(res => setRefDocs(res.documents.filter(d => NATIVE_TEMPLATE_EXT.test(d.filename))))
+      .catch(() => setRefDocsFailed(true));
+  }, [open, refDocs, refDocsFailed]);
+
+  const handleDownload = () => {
+    if (busy) return;
+    downloadAnswerAsDocument(sessionId, message.id, {
+      ...(format ? { format } : {}),
+      ...(refDocId ? { referenceDocumentId: refDocId } : {}),
+    });
+  };
+
+  return (
+    <div className="mt-3 pt-3 border-t border-current/10">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className={`flex items-center gap-1.5 text-[11px] font-semibold tracking-wide uppercase transition-colors duration-200
+          ${isDark ? 'text-white/45 hover:text-white/80' : 'text-charcoal/45 hover:text-charcoal/75'}`}
+      >
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7,10 12,15 17,10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        {busy ? 'Preparing document…' : 'Download as document'}
+        <svg
+          width="10" height="10" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2.5"
+          className={`transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+        >
+          <polyline points="6,9 12,15 18,9"/>
+        </svg>
+      </button>
+
+      <div className="pg-expand" data-open={open}>
+        <div>
+          <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+            {/* Format picker */}
+            <div className={`flex items-center rounded-full border p-0.5
+              ${isDark ? 'border-white/10' : 'border-charcoal/12'}`}
+            >
+              {GEN_FORMATS.map(f => (
+                <button
+                  key={f.label}
+                  onClick={() => setFormat(f.value)}
+                  disabled={busy}
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors duration-150
+                    disabled:cursor-not-allowed
+                    ${format === f.value
+                      ? isDark ? 'bg-white/12 text-white/90' : 'bg-charcoal/10 text-charcoal/90'
+                      : isDark ? 'text-white/40 hover:text-white/70' : 'text-charcoal/40 hover:text-charcoal/70'
+                    }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Style reference picker */}
+            <select
+              value={refDocId ?? ''}
+              onChange={e => setRefDocId(e.target.value || null)}
+              disabled={busy || refDocsFailed || (refDocs !== null && refDocs.length === 0)}
+              className={`text-[11px] px-2.5 py-1.5 rounded-full border bg-transparent outline-none
+                transition-colors duration-150 max-w-[200px] truncate
+                ${isDark
+                  ? 'border-white/10 text-white/55 hover:border-white/20 disabled:text-white/25'
+                  : 'border-charcoal/12 text-charcoal/55 hover:border-charcoal/22 disabled:text-charcoal/25'
+                }`}
+            >
+              <option value="">
+                {refDocsFailed
+                  ? 'Style match unavailable'
+                  : refDocs === null
+                    ? 'Match style — loading…'
+                    : refDocs.length === 0
+                      ? 'No template documents'
+                      : 'Match style: none'}
+              </option>
+              {(refDocs ?? []).map(d => (
+                <option key={d.documentId} value={d.documentId}>{d.filename}</option>
+              ))}
+            </select>
+
+            {/* Trigger */}
+            <button
+              onClick={handleDownload}
+              disabled={busy}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium
+                transition-all duration-150 active:scale-95 disabled:active:scale-100
+                ${isDark
+                  ? 'bg-white text-[#1c1c1e] hover:bg-white/90 disabled:bg-white/25 disabled:text-white/50'
+                  : 'bg-[#2C2C2E] text-white hover:bg-[#3a3a3c] disabled:bg-charcoal/20 disabled:text-white/70'
+                }`}
+            >
+              {busy && (
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin">
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" strokeLinecap="round"/>
+                </svg>
+              )}
+              {busy ? 'Preparing…' : 'Download'}
+            </button>
+          </div>
+
+          {message.artifactError && (
+            <p className={`mt-2 text-[11px] leading-relaxed ${isDark ? 'text-red-300/80' : 'text-red-600/85'}`}>
+              {message.artifactError}
+            </p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -239,6 +400,7 @@ function ThinkingDots({ isDark, label }: { isDark: boolean; label?: string }) {
 export default function MessageBubble({
   message,
   isDark,
+  sessionId,
   researchJob,
   resumeNotice,
   onRunResearch,
@@ -250,6 +412,8 @@ export default function MessageBubble({
 }: {
   message: Message;
   isDark: boolean;
+  /** Owning session — needed to attach a rendered document back to this message. */
+  sessionId: string;
   researchJob?: ResearchJobRecord;
   /** Inline feedback for a "Check again" click that couldn't proceed. */
   resumeNotice?: string;
@@ -358,6 +522,20 @@ export default function MessageBubble({
           {!isUser && !message.isError && message.artifact && (
             <ArtifactCard artifact={message.artifact} isDark={isDark} />
           )}
+
+          {/* Download-as-document control — any completed answer with no
+              artifact yet. Only once the answer has actually landed:
+              researchPrompt is set the moment the consent card appears, well
+              before there is any content to download, and a still-running
+              research job has nothing to download either. A failed attempt
+              (from this control or from Generate mode's own automatic call)
+              surfaces inline here — the answer text above stands regardless. */}
+          {!isUser && !message.isError && !message.isStreaming && !!message.content &&
+            !message.artifact &&
+            !message.researchPrompt &&
+            !(researchJob && researchJob.status !== 'COMPLETED') && (
+              <DownloadAnswerControl message={message} isDark={isDark} sessionId={sessionId} />
+            )}
 
           {/* Citations */}
           {!isUser && !message.isError && !!message.citations?.length && (

@@ -154,7 +154,15 @@ export async function chatQuery(
 // ─── 2b. Standalone generation  POST /documents/generate ─────────────────────
 
 export interface GenerateDocumentRequest extends GenerateDocumentOptions {
-  prompt: string;
+  /**
+   * Finished text to render as-is. Content mode skips retrieval and the model
+   * entirely, so the document IS the answer rather than a fresh derivation of
+   * it. Preferred whenever the text already exists.
+   */
+  content?: string;
+  /** Instruction to generate from. Required unless `content` is supplied. */
+  prompt?: string;
+  title?: string;
   sessionId?: string;
   filters?: Record<string, string>;
   downloadTtlSeconds?: number;
