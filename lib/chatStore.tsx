@@ -704,6 +704,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         },
       });
       sessionId = id;
+    } else {
+      const session = state.sessions.find(s => s.id === sessionId);
+      if (session && session.messageCount === 0) {
+        dispatch({ type: 'SET_SESSION_TITLE', payload: { id: sessionId, title: titleFromQuestion(question) } });
+      }
     }
 
     dispatch({
@@ -727,7 +732,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     });
 
     await runResearch(sessionId, placeholderId, question);
-  }, [state.activeSessionId, runResearch]);
+  }, [state.activeSessionId, state.sessions, runResearch]);
 
   const answerWithoutResearch = useCallback(
     async (sessionId: string, messageId: string, question: string) => {

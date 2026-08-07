@@ -191,6 +191,7 @@ export default function ChatInput() {
         setIsSearching(false);
       }
     } else if (isResearchMode) {
+      if (isQuerying) return;
       await startResearch(q);
       setValue('');
       setIsResearchMode(false);
