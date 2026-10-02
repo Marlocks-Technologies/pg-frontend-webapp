@@ -30,6 +30,7 @@ import {
   type ResearchJobRecord,
 } from './researchJobs';
 import { useResearchJobs } from './useResearchJobs';
+import { isStreamingEnabled, streamChatQuery } from './streamingChat';
 
 // ─── Domain Types ─────────────────────────────────────────────────────────────
 
@@ -603,6 +604,58 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  // Real token streaming for the plain Q&A path. Renders tokens into the
+  // placeholder message as they arrive (instead of waiting for the whole
+  // answer and typing it out). Returns true when it fully delivered the
+  // answer; false when streaming is disabled or failed, so the caller can
+  // fall back to the HTTP path (which also re-runs backend research routing).
+  const tryStreamAnswer = useCallback(
+    async (
+      sessionId: string,
+      messageId: string,
+      question: string,
+      useHistory: boolean,
+    ): Promise<boolean> => {
+      if (!isStreamingEnabled()) return false;
+      let accumulated = '';
+      let started = false;
+      try {
+        const result = await streamChatQuery(
+          { question, sessionId, ...(useHistory ? { useHistory: true } : {}) },
+          {
+            onChunk: (text) => {
+              if (!started) {
+                started = true;
+                dispatch({ type: 'SET_QUERYING', payload: { sessionId, value: false } });
+              }
+              accumulated += text;
+              dispatch({
+                type: 'PATCH_MESSAGE',
+                payload: { sessionId, messageId, patch: { content: accumulated, isStreaming: true } },
+              });
+            },
+          },
+        );
+        dispatch({
+          type: 'PATCH_MESSAGE',
+          payload: {
+            sessionId,
+            messageId,
+            patch: {
+              content: result.answer,
+              citations: result.citations as Citation[],
+              isStreaming: false,
+            },
+          },
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    []
+  );
+
   // ── Async legal research ───────────────────────────────────────────────────
   // The backend answers authority-heavy questions with 409 researchRequired
   // rather than risking API Gateway's sync timeout. The registry owns the
@@ -704,6 +757,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         const isFollowUp = (state.sessions.find(s => s.id === sessionId)?.messageCount ?? 0) > 1;
         const useHistory = isFollowUp ? { useHistory: true } : {};
 
+        // Stream the plain Q&A answer token-by-token. Questions long enough to
+        // route to async research (and document-generation requests) stay on
+        // the HTTP path, which can still 409→research; any streaming failure
+        // also falls back to it.
+        if (!generateOptions && question.length <= 1000) {
+          const streamed = await tryStreamAnswer(sessionId, placeholderId, question, isFollowUp);
+          if (streamed) return;
+        }
+
         const resp = generateOptions
           ? question.length > 1000
             // Over the sync cap even with generation off — force research
@@ -802,7 +864,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         });
       }
     },
-    [state.activeSessionId, state.sessions, typewrite]
+    [state.activeSessionId, state.sessions, typewrite, tryStreamAnswer]
   );
 
   // ── Deep research consent actions ──────────────────────────────────────────
@@ -916,6 +978,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         const messageIndex = messages.findIndex(m => m.id === messageId);
         const isFollowUp = messageIndex > 2;
 
+        // Research has already been declined here, so stream the answer
+        // directly; fall back to HTTP if streaming is unavailable.
+        const streamed = await tryStreamAnswer(sessionId, messageId, question, isFollowUp);
+        if (streamed) {
+          dispatch({ type: 'SET_QUERYING', payload: { sessionId, value: false } });
+          return;
+        }
+
         const resp = await chatQuery({
           question,
           sessionId,
@@ -952,7 +1022,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         });
       }
     },
-    [state.sessions, typewrite]
+    [state.sessions, typewrite, tryStreamAnswer]
   );
 
   const dismissResearch = useCallback((sessionId: string, messageId: string) => {
