@@ -38,12 +38,42 @@ export async function forwardAuthenticated(
     cache: 'no-store',
     redirect: 'manual',
   });
-  const responseHeaders = new Headers({ 'Cache-Control': 'no-store' });
-  for (const name of ['content-type', 'content-disposition', 'location']) {
-    const value = upstream.headers.get(name);
-    if (value) responseHeaders.set(name, value);
+  return new Response(upstream.body, { status: upstream.status, headers: safeResponseHeaders(upstream.headers) });
+}
+
+// Backend responses are served from the app origin, beside the session cookies,
+// so nothing relayed may render as active content there.
+const inlineTypes = ['application/json', 'text/plain'];
+const downloadTypes = [
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/octet-stream',
+];
+
+function safeResponseHeaders(upstream: Headers): Headers {
+  const headers = new Headers({
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "sandbox; default-src 'none'",
+  });
+  const location = upstream.get('location');
+  if (location) headers.set('location', location);
+
+  const contentType = upstream.get('content-type');
+  if (!contentType) return headers;
+  const mediaType = contentType.split(';')[0].trim().toLowerCase();
+  if (inlineTypes.includes(mediaType)) {
+    headers.set('content-type', contentType);
+    return headers;
   }
-  return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
+  const disposition = upstream.get('content-disposition');
+  headers.set('content-type', downloadTypes.includes(mediaType) ? contentType : 'application/octet-stream');
+  headers.set('content-disposition', disposition ? disposition.replace(/^\s*inline\b/i, 'attachment') : 'attachment');
+  if (!/^\s*attachment\b/i.test(headers.get('content-disposition')!)) {
+    headers.set('content-disposition', `attachment; ${headers.get('content-disposition')}`);
+  }
+  return headers;
 }
 
 export async function authenticatedBackendResponse(request: Request, path: string): Promise<Response> {
