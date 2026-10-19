@@ -31,6 +31,7 @@ import {
 } from './researchJobs';
 import { useResearchJobs } from './useResearchJobs';
 import { isStreamingEnabled, streamChatQuery } from './streamingChat';
+import { accountStorageKey, setActiveAccountSub } from './accountStorage';
 
 // ─── Domain Types ─────────────────────────────────────────────────────────────
 
@@ -116,7 +117,7 @@ const THEME_KEY   = 'pg-chat-theme';
 function loadSessions(): Session[] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(accountStorageKey(STORAGE_KEY));
     if (!raw) return [];
     const parsed = JSON.parse(raw) as Record<string, unknown>[];
     return parsed.map(deserialiseSession);
@@ -128,7 +129,7 @@ function loadSessions(): Session[] {
 function saveSessions(sessions: Session[]) {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions.map(serialiseSession)));
+    localStorage.setItem(accountStorageKey(STORAGE_KEY), JSON.stringify(sessions.map(serialiseSession)));
   } catch {
     // Quota exceeded — silently skip
   }
@@ -448,7 +449,7 @@ function isPreContentModeRejection(error: unknown): boolean {
   );
 }
 
-export function ChatProvider({ children }: { children: ReactNode }) {
+export function ChatProvider({ children, userSub }: { children: ReactNode; userSub: string }) {
   const [state, dispatch] = useReducer(reducer, {
     sessions: [],
     activeSessionId: null,
@@ -466,18 +467,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   // ── Hydrate from localStorage on mount ────────────────────────────────────
   useEffect(() => {
+    setActiveAccountSub(userSub);
     dispatch({
       type: 'HYDRATE',
       payload: { sessions: loadSessions(), isDark: loadTheme() },
     });
-  }, []);
+  }, [userSub]);
 
   // ── Persist sessions whenever they change ─────────────────────────────────
   useEffect(() => {
+    if (!state.isHydrated) return;
     // Only save sessions that have messages (skip blank "New conversation" shells)
     const toSave = state.sessions.filter(s => s.messageCount > 0);
     saveSessions(toSave);
-  }, [state.sessions]);
+  }, [state.sessions, state.isHydrated]);
 
   // ── Persist theme whenever it changes ─────────────────────────────────────
   useEffect(() => {

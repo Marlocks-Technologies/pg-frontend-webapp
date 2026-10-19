@@ -6,10 +6,11 @@ import Sidebar from './Sidebar';
 import ChatArea from './ChatArea';
 import DocumentsPanel from './DocumentsPanel';
 import ResearchToast from './ResearchToast';
+import type { PgIdentity } from '@/lib/server/authSession';
 
 type Tab = 'chat' | 'documents';
 
-export default function ChatPage() {
+export default function ChatPage({ identity }: { identity: PgIdentity }) {
   const { state, toggleSidebar } = useChatStore();
   const { isDark, isSidebarOpen } = state;
   const [activeTab, setActiveTab] = useState<Tab>('chat');
@@ -17,7 +18,7 @@ export default function ChatPage() {
   return (
     <div className={`flex h-screen overflow-hidden ${isDark ? 'bg-[#111113]' : 'bg-[#f5f5f7]'}`}>
       {/* ── Sidebar ───────────────────────────────────────────────────────── */}
-      <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
+      <Sidebar activeTab={activeTab} onTabChange={setActiveTab} identity={identity} />
 
       {/* ── Main panel ────────────────────────────────────────────────────── */}
       <div className="flex flex-col flex-1 min-w-0 min-h-0 relative">
@@ -41,7 +42,7 @@ export default function ChatPage() {
         )}
 
         {activeTab === 'chat'      && <ChatArea />}
-        {activeTab === 'documents' && <DocumentsPanel isDark={isDark} />}
+        {activeTab === 'documents' && identity.role !== 'regular_user' && <DocumentsPanel isDark={isDark} />}
 
         <ResearchToast />
       </div>

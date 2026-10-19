@@ -29,6 +29,7 @@ interface StreamChatOptions {
   url?: string | null;
   /** Injectable WebSocket implementation for tests. */
   WebSocketImpl?: typeof WebSocket;
+  fetchImpl?: typeof fetch;
 }
 
 /** The configured WebSocket endpoint, or null when streaming is not enabled. */
@@ -42,7 +43,7 @@ export function isStreamingEnabled(): boolean {
   return streamingChatUrl() !== null && typeof WebSocket !== 'undefined';
 }
 
-export function streamChatQuery(
+export async function streamChatQuery(
   payload: StreamChatPayload,
   handlers: StreamChatHandlers,
   options?: StreamChatOptions,
@@ -51,6 +52,17 @@ export function streamChatQuery(
   const WS =
     options?.WebSocketImpl ??
     (typeof WebSocket !== 'undefined' ? WebSocket : undefined);
+
+  if (!url) throw new Error('streaming disabled: NEXT_PUBLIC_WEBSOCKET_URL is not set');
+  if (!WS) throw new Error('WebSocket is not available in this environment');
+  const ticketResponse = await (options?.fetchImpl ?? fetch)('/api/backend/app/ws-ticket', {
+    method: 'POST', cache: 'no-store',
+  });
+  if (!ticketResponse.ok) throw new Error('Could not authorize streaming connection');
+  const { ticket } = await ticketResponse.json() as { ticket?: string };
+  if (!ticket) throw new Error('Missing streaming ticket');
+  const ticketedUrl = new URL(url);
+  ticketedUrl.searchParams.set('ticket', ticket);
 
   return new Promise<StreamChatResult>((resolve, reject) => {
     if (!url) {
@@ -68,7 +80,7 @@ export function streamChatQuery(
 
     let ws: WebSocket;
     try {
-      ws = new WS(url);
+      ws = new WS(ticketedUrl.toString());
     } catch (err) {
       reject(err instanceof Error ? err : new Error('failed to open websocket'));
       return;

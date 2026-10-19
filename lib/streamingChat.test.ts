@@ -33,6 +33,7 @@ class FakeWebSocket {
 }
 
 const URL = 'wss://example.test/prod';
+const fetchTicket = (async () => Response.json({ ticket: 'one-use-ticket' })) as typeof fetch;
 
 describe('streamChatQuery', () => {
   it('sends a chat action and resolves with the accumulated answer and citations', async () => {
@@ -40,10 +41,13 @@ describe('streamChatQuery', () => {
     const promise = streamChatQuery(
       { question: 'What is a contract?', sessionId: 's1', useHistory: true },
       { onChunk: (t) => chunks.push(t) },
-      { url: URL, WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket },
+      { url: URL, WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket, fetchImpl: fetchTicket },
     );
 
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
     const ws = FakeWebSocket.last!;
+    expect(ws.url).toContain('ticket=one-use-ticket');
     ws.open();
     expect(JSON.parse(ws.sent[0])).toEqual({
       action: 'chat',
@@ -69,8 +73,9 @@ describe('streamChatQuery', () => {
     const promise = streamChatQuery(
       { question: 'Q', sessionId: 's1' },
       { onChunk: () => {} },
-      { url: URL, WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket },
+      { url: URL, WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket, fetchImpl: fetchTicket },
     );
+    await new Promise((resolve) => setTimeout(resolve, 0));
     const ws = FakeWebSocket.last!;
     ws.open();
     ws.message({ type: 'error', message: 'boom' });

@@ -6,6 +6,7 @@ import {
   startLegalResearch,
   type LegalResearchResult,
 } from './api';
+import { accountStorageKey } from './accountStorage';
 
 export type ResearchStatus =
   | 'QUEUED'
@@ -68,7 +69,7 @@ let tabId = '';
 function load(): Record<string, ResearchJobRecord> {
   if (typeof window === 'undefined') return {};
   try {
-    const raw = localStorage.getItem(JOBS_KEY);
+    const raw = localStorage.getItem(accountStorageKey(JOBS_KEY));
     return raw ? (JSON.parse(raw) as Record<string, ResearchJobRecord>) : {};
   } catch {
     return {};
@@ -78,7 +79,7 @@ function load(): Record<string, ResearchJobRecord> {
 function save(): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(JOBS_KEY, JSON.stringify(jobs));
+    localStorage.setItem(accountStorageKey(JOBS_KEY), JSON.stringify(jobs));
   } catch {
     // Quota or private browsing — degrade to in-memory.
   }
@@ -154,11 +155,11 @@ function nextDelay(jobId: string): number {
 function claimLock(): boolean {
   if (typeof window === 'undefined') return false;
   try {
-    const raw = localStorage.getItem(LOCK_KEY);
+    const raw = localStorage.getItem(accountStorageKey(LOCK_KEY));
     const lock = raw ? (JSON.parse(raw) as { tabId: string; ts: number }) : null;
     const now = Date.now();
     if (!lock || lock.tabId === tabId || now - lock.ts > LOCK_STALE_MS) {
-      localStorage.setItem(LOCK_KEY, JSON.stringify({ tabId, ts: now }));
+      localStorage.setItem(accountStorageKey(LOCK_KEY), JSON.stringify({ tabId, ts: now }));
       return true;
     }
     return false;
@@ -186,7 +187,7 @@ function tick(): void {
 }
 
 function onStorage(event: StorageEvent): void {
-  if (event.key !== JOBS_KEY) return;
+  if (event.key !== accountStorageKey(JOBS_KEY)) return;
   jobs = load();
   emit({ kind: 'changed', jobs: Object.values(jobs) });
 }
@@ -406,7 +407,7 @@ export function dropSessionJobs(sessionId: string): void {
 function loadAnnounced(): Record<string, number> {
   if (typeof window === 'undefined') return {};
   try {
-    const raw = localStorage.getItem(ANNOUNCED_KEY);
+    const raw = localStorage.getItem(accountStorageKey(ANNOUNCED_KEY));
     return raw ? (JSON.parse(raw) as Record<string, number>) : {};
   } catch {
     return {};
@@ -416,7 +417,7 @@ function loadAnnounced(): Record<string, number> {
 function saveAnnounced(map: Record<string, number>): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(ANNOUNCED_KEY, JSON.stringify(map));
+    localStorage.setItem(accountStorageKey(ANNOUNCED_KEY), JSON.stringify(map));
   } catch {
     // Quota or private browsing — degrade to "every tab announces", which is
     // a duplicate toast, not a lost one.

@@ -1,10 +1,6 @@
-const BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  'https://r17l0a5vbi.execute-api.eu-west-1.amazonaws.com/prod';
+const BASE_URL = '/api/backend';
 
-const DOCUMENT_URL =
-  process.env.NEXT_PUBLIC_DOCUMENT_BASE_URL ||
-  BASE_URL;
+const DOCUMENT_URL = BASE_URL;
 
 // Legal research always goes through this app's own route handlers — the
 // backend gates /chat/research behind an API key that must never reach a

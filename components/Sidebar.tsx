@@ -4,6 +4,7 @@ import { useState } from 'react';
 import React from 'react';
 import { useChatStore, Session } from '@/lib/chatStore';
 import { type ResearchJobRecord } from '@/lib/researchJobs';
+import type { PgIdentity } from '@/lib/server/authSession';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -128,9 +129,11 @@ type Tab = 'chat' | 'documents';
 export default function Sidebar({
   activeTab,
   onTabChange,
+  identity,
 }: {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
+  identity: PgIdentity;
 }) {
   const {
     state,
@@ -226,12 +229,12 @@ export default function Sidebar({
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
               </svg>
             )},
-            { id: 'documents', label: 'Docs',      icon: (
+            ...(identity.role === 'regular_user' ? [] : [{ id: 'documents' as Tab, label: 'Docs', icon: (
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                 <polyline points="14,2 14,8 20,8"/>
               </svg>
-            )},
+            )}]),
           ] as { id: Tab; label: string; icon: React.ReactNode }[]).map(tab => (
             <button
               key={tab.id}
@@ -317,6 +320,12 @@ export default function Sidebar({
 
         {/* ── Footer: theme toggle + disclaimer ────────────────────────── */}
         <div className={`px-4 py-4 border-t ${isDark ? 'border-white/[0.07]' : 'border-charcoal/[0.07]'}`}>
+          <div className="mb-4 text-xs">
+            <div className="truncate font-medium">{identity.email}</div>
+            <div className="mt-1 capitalize opacity-60">{identity.role.replace('_', ' ')}</div>
+            {identity.role === 'admin' && <a href="/admin" className="mt-3 inline-block underline">Admin dashboard</a>}
+            <form action="/api/auth/logout" method="post"><button type="submit" className="mt-3 underline">Sign out</button></form>
+          </div>
           {/* Segmented dark/light control */}
           <div className={`flex items-center p-1 rounded-xl
             ${isDark ? 'bg-white/[0.06]' : 'bg-charcoal/[0.06]'}`}
