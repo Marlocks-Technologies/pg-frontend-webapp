@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
+import { BrandLockup, BrandMark } from '@/components/Brand';
 
 // ─── Demo conversations ────────────────────────────────────────────────────────
 
@@ -239,7 +240,7 @@ function DemoChat({ isDark }: { isDark: boolean }) {
       <div className={`flex items-center gap-2 px-4 py-3 border-b ${divider}`}>
         <span className="w-[6px] h-[6px] rounded-full bg-emerald-400 shrink-0" />
         <span className={`text-[11.5px] font-bold tracking-[0.1em] uppercase ${isDark ? 'text-white/70' : 'text-charcoal/65'}`}>
-          P&G Legal AI
+          Legal AI
         </span>
         <span className={`ml-auto text-[10px] ${isDark ? 'text-white/22' : 'text-charcoal/28'}`}>
           Internal research tool
@@ -398,13 +399,9 @@ export default function LandingPage() {
   const togIco    = D ? 'text-white/50'                       : 'text-charcoal/50';
 
   // Primary button
-  const primaryBtn = D
-    ? 'bg-white text-[#111113] hover:bg-white/90'
-    : 'bg-[#2C2C2E] text-white hover:bg-[#3a3a3c]';
+  const primaryBtn = 'bg-ember text-white hover:bg-ember-deep';
 
   // Footer wordmark
-  const ftrWm     = D ? 'text-white/28'                      : 'text-charcoal';
-  const ftrWmIco  = D ? 'bg-white/[0.05] border-white/[0.07]': 'bg-charcoal/[0.05] border-charcoal/[0.07]';
   const ftrTxt    = D ? 'text-white/18'                      : 'text-charcoal';
 
   return (
@@ -423,15 +420,9 @@ export default function LandingPage() {
         <nav className={`fixed top-0 inset-x-0 z-40 flex items-center justify-between px-6 lg:px-10 h-[52px] border-b ${navBorder} ${navBg}`}>
           {/* Wordmark */}
           <div className="flex items-center gap-2.5">
-            <div className={`w-[26px] h-[26px] rounded-lg flex items-center justify-center border ${icoBg}`}>
-              <svg width="12" height="12" viewBox="0 0 32 32" fill="none">
-                <path d="M16 4L4 10.5l12 6 12-6L16 4z" fill={D ? 'rgba(255,255,255,0.8)' : 'rgba(44,44,46,0.75)'} />
-                <path d="M4 16l12 6 12-6" stroke={D ? 'rgba(255,255,255,0.28)' : 'rgba(44,44,46,0.28)'} strokeWidth="2.2" strokeLinecap="round"/>
-                <path d="M4 22l12 6 12-6" stroke={D ? 'rgba(255,255,255,0.14)' : 'rgba(44,44,46,0.14)'} strokeWidth="2.2" strokeLinecap="round"/>
-              </svg>
-            </div>
+            <BrandMark size={28} />
             <span className={`text-[11.5px] font-bold tracking-[0.1em] uppercase ${wm}`}>
-              P&G Legal AI
+              Perchstone &amp; Graeys
             </span>
           </div>
 
@@ -658,18 +649,9 @@ export default function LandingPage() {
         {/* ── Footer ───────────────────────────────────────────────────────── */}
         <footer className={`border-t ${navBorder} px-6 lg:px-10 py-8`}>
           <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
-            <div className="flex items-center gap-2.5 shrink-0">
-              <div className={`w-5 h-5 rounded-md flex items-center justify-center border ${ftrWmIco}`}>
-                <svg width="9" height="9" viewBox="0 0 32 32" fill="none">
-                  <path d="M16 4L4 10.5l12 6 12-6L16 4z" fill={D ? 'rgba(255,255,255,0.65)' : 'rgba(44,44,46,0.6)'}/>
-                </svg>
-              </div>
-              <span className={`text-[11.5px] font-bold tracking-[0.1em] uppercase ${ftrWm}`}>
-                Perchstone & Graeys
-              </span>
-            </div>
+            <BrandLockup tone={D ? 'dark' : 'light'} className="w-[180px] shrink-0" />
             <p className={`text-[10px] leading-relaxed max-w-sm ${ftrTxt}`}>
-              P&G Legal AI is an internal research instrument and may make errors.
+              Perchstone &amp; Graeys Legal AI is an internal research instrument and may make errors.
               Verify every answer against its cited source and with a qualified
               solicitor before it reaches a client.
             </p>

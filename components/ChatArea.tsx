@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { BrandLockup } from '@/components/Brand';
 import { useChatStore } from '@/lib/chatStore';
 import { resumeResearchJob, ResearchBusyError } from '@/lib/researchJobs';
 import MessageBubble from './MessageBubble';
@@ -247,20 +248,12 @@ export default function ChatArea() {
             <div className="w-full max-w-2xl">
               {/* Hero */}
               <div className="pg-rise text-center mb-10">
-                <div className={`inline-flex w-14 h-14 rounded-2xl items-center justify-center mb-5
-                  ${isDark ? 'bg-[#1c1c1e] border border-white/10' : 'bg-white border border-charcoal/10'}`}
-                >
-                  <svg width="26" height="26" viewBox="0 0 32 32" fill="none">
-                    <path d="M16 3L3 9.5l13 6.5 13-6.5L16 3z" fill={isDark ? 'rgba(255,255,255,0.85)' : '#2C2C2E'} />
-                    <path d="M3 22l13 6.5L29 22" stroke={isDark ? 'rgba(255,255,255,0.4)' : '#2C2C2E'} strokeWidth="2" strokeLinecap="round" opacity="0.6"/>
-                    <path d="M3 16l13 6.5L29 16" stroke={isDark ? 'rgba(255,255,255,0.25)' : '#2C2C2E'} strokeWidth="2" strokeLinecap="round" opacity="0.4"/>
-                  </svg>
-                </div>
+                <BrandLockup tone={isDark ? 'dark' : 'light'} className="mx-auto mb-8 w-[220px] sm:w-[260px]" />
 
                 <h2 className={`text-[22px] font-bold tracking-tight mb-2
                   ${isDark ? 'text-white/90' : 'text-charcoal/90'}`}
                 >
-                  P&G Legal AI
+                  Legal AI
                 </h2>
                 <p className={`text-[13.5px] leading-relaxed max-w-sm mx-auto
                   ${isDark ? 'text-white/55' : 'text-charcoal/50'}`}

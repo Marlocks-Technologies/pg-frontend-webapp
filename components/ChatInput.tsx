@@ -424,9 +424,7 @@ export default function ChatInput() {
             group shrink-0 mb-0.5 w-8 h-8 rounded-xl flex items-center justify-center
             transition-all duration-200 active:scale-90
             ${canSend
-              ? isDark
-                ? 'bg-white text-[#1c1c1e] hover:bg-white/90 scale-100'
-                : 'bg-[#2C2C2E] text-white hover:bg-[#3a3a3c] scale-100'
+              ? 'bg-ember text-white hover:bg-ember-deep scale-100'
               : isDark
                 ? 'bg-white/8 text-white/25 cursor-not-allowed scale-95'
                 : 'bg-charcoal/5 text-charcoal/22 cursor-not-allowed scale-95'
@@ -453,7 +451,7 @@ export default function ChatInput() {
       <p className={`text-center text-[10px] mt-2.5
         ${isDark ? 'text-white/30' : 'text-charcoal/30'}`}
       >
-        P&G Legal AI · For research purposes only — not legal advice
+        Perchstone &amp; Graeys Legal AI · For research purposes only — not legal advice
       </p>
     </div>
   );

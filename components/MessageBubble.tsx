@@ -67,9 +67,7 @@ function ArtifactCard({ artifact, isDark }: { artifact: GeneratedArtifact; isDar
         download={artifact.filename}
         className={`group/dl shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg
           text-[11px] font-medium transition-all duration-200 active:scale-95
-          ${isDark
-            ? 'bg-white text-[#1c1c1e] hover:bg-white/90'
-            : 'bg-[#2C2C2E] text-white hover:bg-[#3a3a3c]'}`}
+          bg-ember text-white hover:bg-ember-deep`}
       >
         <svg
           width="11" height="11" viewBox="0 0 24 24" fill="none"
@@ -251,10 +249,7 @@ function DownloadAnswerControl({
               disabled={busy}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium
                 transition-all duration-150 active:scale-95 disabled:active:scale-100
-                ${isDark
-                  ? 'bg-white text-[#1c1c1e] hover:bg-white/90 disabled:bg-white/25 disabled:text-white/50'
-                  : 'bg-[#2C2C2E] text-white hover:bg-[#3a3a3c] disabled:bg-charcoal/20 disabled:text-white/70'
-                }`}
+                bg-ember text-white hover:bg-ember-deep ${isDark ? 'disabled:bg-white/25 disabled:text-white/50' : 'disabled:bg-charcoal/20 disabled:text-white/70'}`}
             >
               {busy && (
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin">

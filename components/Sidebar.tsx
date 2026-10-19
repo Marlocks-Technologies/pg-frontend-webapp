@@ -5,6 +5,7 @@ import React from 'react';
 import { useChatStore, Session } from '@/lib/chatStore';
 import { type ResearchJobRecord } from '@/lib/researchJobs';
 import type { PgIdentity } from '@/lib/server/authSession';
+import { BrandMark } from '@/components/Brand';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -73,7 +74,7 @@ function SessionRow({
           />
         ) : (
           <span className={`mt-[7px] shrink-0 w-1.5 h-1.5 rounded-full
-            ${isActive ? 'bg-amber-400' : isDark ? 'bg-white/15' : 'bg-charcoal/18'}`}
+            ${isActive ? 'bg-ember' : isDark ? 'bg-white/15' : 'bg-charcoal/18'}`}
           />
         )}
 
@@ -173,32 +174,18 @@ export default function Sidebar({
           ${isDark ? 'border-white/[0.07]' : 'border-charcoal/[0.07]'}`}
         >
           <div className="flex items-center gap-3">
-            {/* Logo mark */}
-            <div className={`w-8 h-8 rounded-xl flex items-center justify-center
-              ${isDark ? 'bg-white/9' : 'bg-charcoal/7'}`}
-            >
-              <svg width="17" height="17" viewBox="0 0 32 32" fill="none">
-                <path d="M16 4L4 10.5l12 6 12-6L16 4z"
-                  fill={isDark ? 'rgba(255,255,255,0.88)' : '#2C2C2E'} />
-                <path d="M4 22l12 6 12-6"
-                  stroke={isDark ? 'rgba(255,255,255,0.38)' : '#2C2C2E'}
-                  strokeWidth="2" strokeLinecap="round" opacity="0.7"/>
-                <path d="M4 16l12 6 12-6"
-                  stroke={isDark ? 'rgba(255,255,255,0.22)' : '#2C2C2E'}
-                  strokeWidth="2" strokeLinecap="round" opacity="0.5"/>
-              </svg>
-            </div>
+            <BrandMark size={32} />
 
             <div>
               <p className={`text-[11.5px] font-bold tracking-[0.1em] uppercase
                 ${isDark ? 'text-white/85' : 'text-charcoal/85'}`}
               >
-                P&G Legal AI
+                Perchstone &amp; Graeys
               </p>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                 <p className={`text-[10px] ${isDark ? 'text-white' : 'text-charcoal/38'}`}>
-                  Ready
+                  Legal AI · Ready
                 </p>
               </div>
             </div>
@@ -320,11 +307,21 @@ export default function Sidebar({
 
         {/* ── Footer: theme toggle + disclaimer ────────────────────────── */}
         <div className={`px-4 py-4 border-t ${isDark ? 'border-white/[0.07]' : 'border-charcoal/[0.07]'}`}>
-          <div className="mb-4 text-xs">
-            <div className="truncate font-medium">{identity.email}</div>
-            <div className="mt-1 capitalize opacity-60">{identity.role.replace('_', ' ')}</div>
-            {identity.role === 'admin' && <a href="/admin" className="mt-3 inline-block underline">Admin dashboard</a>}
-            <form action="/api/auth/logout" method="post"><button type="submit" className="mt-3 underline">Sign out</button></form>
+          <div className="mb-4">
+            <p className={`truncate text-[12px] font-medium ${isDark ? 'text-white/85' : 'text-charcoal/85'}`}>{identity.email}</p>
+            <p className={`mt-0.5 text-[11px] capitalize ${isDark ? 'text-white/55' : 'text-charcoal/60'}`}>{identity.role.replace('_', ' ')}</p>
+            <div className="mt-3 flex items-center gap-4 text-[12px] font-medium">
+              {identity.role === 'admin' && (
+                <a href="/admin" className={`underline decoration-ember/70 underline-offset-4 transition-colors hover:text-ember ${isDark ? 'text-white/80' : 'text-charcoal/80'}`}>
+                  Admin dashboard
+                </a>
+              )}
+              <form action="/api/auth/logout" method="post">
+                <button type="submit" className={`underline decoration-ember/70 underline-offset-4 transition-colors hover:text-ember ${isDark ? 'text-white/80' : 'text-charcoal/80'}`}>
+                  Sign out
+                </button>
+              </form>
+            </div>
           </div>
           {/* Segmented dark/light control */}
           <div className={`flex items-center p-1 rounded-xl
@@ -371,7 +368,7 @@ export default function Sidebar({
           <p className={`text-[10px] text-center mt-3 leading-relaxed
             ${isDark ? 'text-white' : 'text-charcoal'}`}
           >
-            P&G Legal AI may make errors.<br/>Verify all answers with a qualified solicitor.
+            Legal AI may make errors.<br/>Verify all answers with a qualified solicitor.
           </p>
         </div>
       </aside>

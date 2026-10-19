@@ -17,6 +17,15 @@
     box-sizing: border-box;
   }
 
+  /* The firm's orange marks focus and selection everywhere. */
+  :focus-visible {
+    outline: 2px solid #D6512C;
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: rgba(214, 81, 44, 0.22);
+  }
+
   /* Thin scrollbars */
   ::-webkit-scrollbar {
     width: 4px;
@@ -302,4 +311,15 @@
 
 @media (prefers-reduced-motion: reduce) {
   .pg-toast-in { animation: none; }
+}
+/* ── Sign-in: the pillar is raised once, on arrival ─────────────────────────── */
+@keyframes pg-pillar-rise {
+  from { clip-path: inset(100% 0 0 0); transform: translateY(24px); }
+  to   { clip-path: inset(0 0 0 0);    transform: translateY(0); }
+}
+.pg-pillar-rise {
+  animation: pg-pillar-rise 1100ms cubic-bezier(0.16, 1, 0.3, 1) 120ms both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pg-pillar-rise { animation: none; }
 }

@@ -14,6 +14,14 @@ const config: Config = {
       },
       colors: {
         charcoal: '#2C2C2E',
+        // The firm's orange, sampled from the lockup. White on `ember` is
+        // 5.3:1; `ember-deep` is the pressed/hover step and the text tone on
+        // light grounds where small type needs more weight.
+        ember: {
+          DEFAULT: '#D6512C',
+          deep: '#B5421F',
+          light: '#E8714F',
+        },
       },
       // The design system tints ink by opacity in fine steps. Tailwind only
       // generates slash-opacities (text-white/88 etc.) for values on this
