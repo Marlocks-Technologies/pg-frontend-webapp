@@ -54,3 +54,34 @@ describe('authenticated backend proxy origin check', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 });
+
+describe('authenticated backend proxy response hardening', () => {
+  const forward = (upstream: Response) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(upstream));
+    return forwardAuthenticated(new Request('https://pg.example.com/api/backend/documents/d1'),
+      '/documents/d1', { ...session, accessExpired: false }, { backendBase: 'https://api.example.com/prod' });
+  };
+
+  it('serves active content from the backend as an inert download', async () => {
+    const result = await forward(new Response('<script>alert(1)</script>', {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }));
+
+    expect(result.headers.get('content-type')).toBe('application/octet-stream');
+    expect(result.headers.get('content-disposition')).toMatch(/^attachment/);
+    expect(result.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(result.headers.get('content-security-policy')).toContain('sandbox');
+  });
+
+  it('keeps JSON and document types, forcing documents to download', async () => {
+    const json = await forward(Response.json({ ok: true }));
+    expect(json.headers.get('content-type')).toContain('application/json');
+    expect(json.headers.get('content-disposition')).toBeNull();
+
+    const pdf = await forward(new Response('%PDF', {
+      headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="brief.pdf"' },
+    }));
+    expect(pdf.headers.get('content-type')).toBe('application/pdf');
+    expect(pdf.headers.get('content-disposition')).toBe('attachment; filename="brief.pdf"');
+  });
+});
