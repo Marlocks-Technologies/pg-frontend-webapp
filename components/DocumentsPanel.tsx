@@ -1282,10 +1282,7 @@ function UploadModal({
             onClick={handleSubmit}
             disabled={loading || extracting}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[13px] font-semibold transition-all active:scale-95
-              ${isDark
-                ? 'bg-white text-[#1c1c1e] hover:bg-white/90 disabled:opacity-40'
-                : 'bg-[#2C2C2E] text-white hover:bg-[#3a3a3c] disabled:opacity-40'
-              }`}
+              bg-ember text-white hover:bg-ember-deep disabled:opacity-40`}
           >
             {loading && (
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin">
@@ -1535,10 +1532,7 @@ export default function DocumentsPanel({ isDark }: { isDark: boolean }) {
           <button
             onClick={() => setShowUpload(true)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[12.5px] font-semibold transition-all active:scale-95
-              ${isDark
-                ? 'bg-white text-[#1c1c1e] hover:bg-white/90 shadow-sm'
-                : 'bg-[#2C2C2E] text-white hover:bg-[#3a3a3c] shadow-sm'
-              }`}
+              bg-ember text-white hover:bg-ember-deep shadow-sm`}
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>

@@ -1,7 +1,10 @@
 ---
-name: P&G Legal AI
-description: Achromatic, hairline-ruled research instrument for Perchstone & Graeys fee-earners
+name: Perchstone & Graeys Legal AI
+description: Hairline-ruled research instrument for Perchstone & Graeys fee-earners, carrying the firm's orange as its one accent
 colors:
+  ember: "#D6512C"
+  ember-deep: "#B5421F"
+  ember-light: "#E8714F"
   ink: "#2C2C2E"
   surface-light: "#f5f5f7"
   surface-light-sunken: "#f0f0f2"
@@ -69,8 +72,8 @@ spacing:
   xl: "40px"
 components:
   button-primary:
-    backgroundColor: "{colors.ink}"
-    textColor: "{colors.surface-light}"
+    backgroundColor: "{colors.ember}"
+    textColor: "#ffffff"
     rounded: "{rounded.lg}"
     padding: "14px 28px"
     typography: "{typography.label}"
@@ -82,15 +85,15 @@ components:
     typography: "{typography.label}"
 ---
 
-# Design System: P&G Legal AI
+# Design System: Perchstone & Graeys Legal AI
 
 <!-- impeccable:design-schema 1 -->
 
 ## Overview
 
-An achromatic research instrument for lawyers. The system is built from two neutrals — charcoal ink and off-white paper — separated by hairlines rather than borders, boxes, or fills. It reads as an instrument panel rather than a document: dense, small-type, quiet, and unornamented, because its users are experts working under time pressure who need to scan rather than be led.
+A research instrument for lawyers, wearing the firm's identity. The system is built from two neutrals — charcoal ink and off-white paper — separated by hairlines rather than borders, boxes, or fills, with the firm's orange (`ember`) as its single accent. It reads as an instrument panel rather than a document: dense, small-type, quiet, and unornamented, because its users are experts working under time pressure who need to scan rather than be led.
 
-The governing idea is **restraint as credibility**. A law firm's product cannot look eager. Every device that would normally carry personality — accent color, illustration, large display type, decorative shadow — has been withheld, which makes the few things that *do* carry weight (a status dot, a citation panel, the disclaimer) read as meaningful rather than styled.
+The governing idea is **restraint as credibility**. A law firm's product cannot look eager. Illustration, large display type and decorative shadow are withheld; the one accent is the firm's own orange, taken from its lockup, and it is spent only where the firm speaks or the user acts — the mark, the primary action, focus, the active item. Everything else stays ink on paper, so the orange keeps its weight.
 
 Light and dark are equal citizens, both authored by hand throughout the component tree via an `isDark` prop rather than CSS variables.
 
@@ -98,7 +101,7 @@ Light and dark are equal citizens, both authored by hand throughout the componen
 
 ### Primary
 
-There is no brand accent color. This is the system's defining rule, not an omission. Identity is carried by `ink` (`#2C2C2E`, "charcoal") against paper, and by nothing else.
+`ember` `#D6512C` is the firm's orange, sampled from the Perchstone & Graeys lockup (October 2026 rebrand; it replaced the earlier no-accent rule at the firm's request). `ember-deep` `#B5421F` is its hover/pressed step and its text tone on light grounds; `ember-light` `#E8714F` exists for tints only. White on `ember` is 5.3:1.
 
 ### Neutral
 
@@ -113,9 +116,10 @@ Text is tinted by **opacity on the ink**, never by a separate gray token: `/88` 
 
 ### Named Rules
 
-- **Color means state, never decoration.** The four hues in the palette are strictly semantic: emerald = ready/succeeded, amber = processing/warning, red = error/destructive, blue = informational. A hue appearing for emphasis, branding, or visual interest is a defect.
+- **Ember is the firm speaking or the user acting.** It fills the monogram, every primary action (one per view), the focus outline, text selection, the active session dot and link underlines. It never fills panels (except the sign-in panel, the one ember field), chat bubbles, headings or body text, and it never signals state.
+- **Other hues mean state, never decoration.** Emerald = ready/active, amber = processing/warning, red = error/destructive, blue = informational. Red stays a cool `red-700`/`#f87171` so it never reads as the brand orange.
 - **Separation is a hairline, not a border.** `charcoal/[0.07]` in light, `white/[0.07]` in dark, always 1px. Heavier rules and colored left-borders are out of the system.
-- **Chroma may enter only from a photographic asset.** The gavel sequence's walnut and brass are permitted because they are the material of a real object, not a chosen accent.
+- **Chroma beyond ember may enter only from a photographic asset.** The gavel sequence's walnut and brass are permitted because they are the material of a real object.
 
 ## Typography
 
@@ -165,7 +169,7 @@ Motion is sparse and purposeful — the app's resting state is the typewriter cu
 
 ### Buttons
 
-Primary is solid ink on paper (inverted in dark). Ghost/icon buttons are transparent, revealing a `ink/6` wash on hover with a 200ms color transition, and step their text opacity up rather than changing hue.
+Primary is solid `ember` with white text in both themes, `ember-deep` on hover; one per view. In the chat shell the send button is that primary, so "New conversation" stays ink-filled. Ghost/icon buttons are transparent, revealing a `ink/6` wash on hover with a 200ms color transition, and step their text opacity up rather than changing hue.
 
 ### Cards / Containers
 
@@ -173,11 +177,19 @@ Panels are a raised surface plus a hairline — never a shadow, never a colored 
 
 ### Inputs / Fields
 
-Sunken surface (`#f0f0f2` / `#3a3a3c`), `rounded-xl`, hairline, no visible focus ring color — focus is shown by hairline contrast increase.
+Sunken surface (`#f0f0f2` / `#3a3a3c`), `rounded-xl`, hairline. Keyboard focus is a 2px `ember` outline at 2px offset, set globally.
 
 ### Navigation
 
 The sidebar is a list of session rows; the active row is a filled wash, not a colored bar. Destructive affordances (delete) are revealed on hover and are the only place red appears in navigation.
+
+### Signature Component — the brand marks
+
+Two marks, traced to vector from the firm's lockup (`public/brand/`). The **lockup** (pillar tile, PERCHSTONE & GRAEYS, "Solicitors. Advocates. Arbitrators.") appears where the firm introduces itself: the sign-in column, the chat empty state, the admin header, the landing footer, and Cognito's hosted page. Use `lockup-dark.svg` on dark grounds. The **monogram** (pillar-PG in the orange tile, `BrandMark`) is the compact mark everywhere else: sidebar, landing header, favicon. `BrandMark variant="glyph"` draws the white pillar alone for orange grounds. Never redraw, recolor or crop the lockup; never pair the monogram with a second icon.
+
+### Signature Component — the column (sign-in)
+
+The sign-in page splits into an `ember` panel and a paper column. The panel carries the pillar glyph at architectural scale, standing on the panel's floor, with two quiet labels ("Legal AI", "Internal · By invitation"); the tagline lives only in the lockup beside it, never repeated. The pillar rises once on arrival (clip-path, 1.1s expo-out), skipped under reduced motion. On small screens the panel collapses to a band the column rises into.
 
 ### Signature Component — the citation panel
 
@@ -203,13 +215,13 @@ A left-margin rail with markers positioned at their real timeline fractions and 
 - Tint text by lowering ink opacity.
 - Keep type small, dense, and weighted.
 - Author both themes explicitly; treat neither as the default.
-- Let a photographic asset supply the only warmth on a surface.
+- Spend ember only on the mark, the primary action, focus and the active item.
 - State the not-legal-advice caveat wherever the product speaks.
 
 ### Don't:
 
-- Introduce a brand accent color, gradient, or gradient text.
-- Use a hue for anything but state.
+- Introduce a second accent, a gradient, or gradient text.
+- Use ember for state, panels, headings or more than one primary action per view.
 - Add shadow, glass, or glow for depth.
 - Apply tracked uppercase as a general section eyebrow.
 - Let display type exceed the compressed scale inside the app shell.

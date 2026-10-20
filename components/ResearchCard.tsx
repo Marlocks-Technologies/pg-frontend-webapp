@@ -62,7 +62,7 @@ export function ResearchConsent({
           <button
             onClick={onRun}
             className={`px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all duration-200 active:scale-95
-              ${isDark ? 'bg-white text-[#1c1c1e] hover:bg-white/90' : 'bg-[#2C2C2E] text-white hover:bg-[#3a3a3c]'}`}
+              bg-ember text-white hover:bg-ember-deep`}
           >
             Run deep research
           </button>
