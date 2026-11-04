@@ -38,6 +38,35 @@ npm run dev
 | `RAG_RESEARCH_API_KEY` | **Server-only — never `NEXT_PUBLIC_*`.** API key for the deep legal-research endpoints. Unset ⇒ deep research returns 503; ordinary chat is unaffected. The older name `RESEARCH_API_KEY` is still read as a fallback |
 | `RESEARCH_API_BASE_URL` | Optional backend for the research proxy; falls back to `API_PROXY_TARGET`, then prod |
 
+## Invitation email logo deployment
+
+`public/brand/lockup-email.png` is the email-safe PNG of the original firm lockup,
+exported at 840px wide on white. The invitation email displays it at 280px wide.
+Keep the original proportions, colors, and full lockup; do not replace it with an
+SVG or a private/authenticated image URL.
+
+Deploy this asset **before** enabling the branded Cognito invitation template:
+
+1. In the frontend hosting service, confirm the connected repository, deployment
+   branch, and public application origin. This repository does not contain a
+   hosting deployment definition; do not assume the current feature branch is
+   automatically deployed.
+2. Merge or cherry-pick the logo change into that deployment branch through the
+   normal review process, then deploy it using the existing hosting workflow.
+3. Open `<APP_ORIGIN>/brand/lockup-email.png` without signing in. Confirm HTTP
+   `200`, `Content-Type: image/png`, and the full firm logo, not a login page or
+   an HTML app-shell fallback. Also check `<APP_ORIGIN>/sign-in`.
+4. Hand off to the backend template deployment only after these checks pass.
+
+The backend derives `APP_ORIGIN` from the first configured Cognito logout URL,
+which must be `<APP_ORIGIN>/sign-in`. Confirm it matches the deployed frontend;
+if several origins are allowed, the first is the invitation destination.
+Keep this asset publicly available at the same path after rollout or rollback:
+already-delivered emails can still request it.
+
+The full rollout, test, and rollback procedure is in the sibling backend
+repository at `docs/INVITATION_EMAIL_DEPLOYMENT.md`.
+
 ---
 
 ## API Endpoints Used
